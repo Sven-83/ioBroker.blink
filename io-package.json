@@ -1,8 +1,8 @@
 {
   "common": {
     "name": "blink",
-    "icon": "admin/blink.png",
-"extIcon": "https://raw.githubusercontent.com/Sven-83/iobroker.blink/main/admin/blink.png",
+    "icon": "blink.png",
+"extIcon": "https://raw.githubusercontent.com/Sven-83/iobroker.blink/main/blink.png",
     "version": "1.0.0",
     "news": {
       "1.0.0": {
