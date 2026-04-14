@@ -1,15 +1,7 @@
 {
   "common": {
     "name": "blink",
-    "icon": "blink.png",
-"extIcon": "https://raw.githubusercontent.com/Sven-83/iobroker.blink/main/blink.png",
     "version": "1.0.0",
-    "news": {
-      "1.0.0": {
-        "en": "Initial release with live snapshots, camera data and arm/disarm support",
-        "de": "Erstveröffentlichung mit Live-Snapshots, Kameradaten und Scharf-/Unscharf-Schaltung"
-      }
-    },
     "title": "Blink Camera",
     "titleLang": {
       "en": "Blink Camera",
@@ -19,26 +11,26 @@
       "en": "Control and monitor Blink cameras: live snapshots, battery, temperature, arm/disarm",
       "de": "Blink-Kameras steuern und überwachen: Live-Snapshots, Batterie, Temperatur, Scharf-/Unscharf-Schaltung"
     },
-    "authors": ["Your Name <your@email.com>"],
+    "authors": ["Sven"],
     "keywords": ["blink", "camera", "security", "snapshot"],
     "license": "MIT",
     "platform": "Javascript/Node.js",
     "main": "main.js",
     "icon": "admin/blink.png",
+    "extIcon": "https://raw.githubusercontent.com/Sven-83/iobroker.blink/main/admin/blink.png",
     "enabled": true,
-    "extIcon": "https://raw.githubusercontent.com/Sven-83/ioBroker.blink/master/admin/blink.png",
-    "readme": "https://github.com/Sven-83/ioBroker.blink/blob/master/README.md",
     "loglevel": "info",
     "mode": "daemon",
     "type": "camera",
     "messagebox": true,
+    "news": {
+      "1.0.0": {
+        "en": "Initial release",
+        "de": "Erstveröffentlichung"
+      }
+    },
     "adminUI": {
       "config": "json"
-    },
-    "adminTab": {
-      "name": "Blink Kameras",
-      "link": "tab.html",
-      "fa-icon": "video-camera"
     }
   },
   "native": {
