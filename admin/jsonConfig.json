@@ -1,0 +1,45 @@
+{
+  "type": "panel",
+  "items": {
+    "email": {
+      "type": "text",
+      "label": "Blink Email",
+      "sm": 12
+    },
+    "password": {
+      "type": "password",
+      "label": "Passwort",
+      "sm": 12
+    },
+    "pin": {
+      "type": "text",
+      "label": "2FA PIN (falls aktiv)",
+      "sm": 12
+    },
+    "pollingInterval": {
+      "type": "number",
+      "label": "Polling Intervall (Sekunden)",
+      "sm": 12,
+      "min": 10,
+      "default": 30
+    },
+    "snapshotPollingInterval": {
+      "type": "number",
+      "label": "Snapshot Intervall (Sekunden)",
+      "sm": 12,
+      "min": 10,
+      "default": 60
+    },
+    "saveSnapshots": {
+      "type": "checkbox",
+      "label": "Snapshots speichern",
+      "sm": 12,
+      "default": true
+    },
+    "snapshotPath": {
+      "type": "text",
+      "label": "Snapshot Pfad",
+      "sm": 12
+    }
+  }
+}
