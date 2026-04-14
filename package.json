@@ -1,0 +1,33 @@
+{
+  "name": "iobroker.blink",
+  "version": "1.0.0",
+  "description": "ioBroker adapter for Blink cameras - live snapshots and full data access",
+  "author": {
+    "name": "ioBroker Blink Adapter"
+  },
+  "homepage": "https://github.com/Sven-83/ioBroker.blink",
+  "license": "MIT",
+  "keywords": [
+    "ioBroker",
+    "blink",
+    "camera",
+    "security",
+    "smart home"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sven-83/ioBroker.blink"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "@iobroker/adapter-core": "^3.0.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {},
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  }
+}

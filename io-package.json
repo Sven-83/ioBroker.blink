@@ -1,0 +1,75 @@
+{
+  "common": {
+    "name": "blink",
+    "version": "1.0.0",
+    "news": {
+      "1.0.0": {
+        "en": "Initial release with live snapshots, camera data and arm/disarm support",
+        "de": "Erstveröffentlichung mit Live-Snapshots, Kameradaten und Scharf-/Unscharf-Schaltung"
+      }
+    },
+    "title": "Blink Camera",
+    "titleLang": {
+      "en": "Blink Camera",
+      "de": "Blink Kamera"
+    },
+    "desc": {
+      "en": "Control and monitor Blink cameras: live snapshots, battery, temperature, arm/disarm",
+      "de": "Blink-Kameras steuern und überwachen: Live-Snapshots, Batterie, Temperatur, Scharf-/Unscharf-Schaltung"
+    },
+    "authors": ["Your Name <your@email.com>"],
+    "keywords": ["blink", "camera", "security", "snapshot"],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "main": "main.js",
+    "icon": "admin/blink.png",
+    "enabled": true,
+    "extIcon": "https://raw.githubusercontent.com/Sven-83/ioBroker.blink/master/admin/blink.png",
+    "readme": "https://github.com/Sven-83/ioBroker.blink/blob/master/README.md",
+    "loglevel": "info",
+    "mode": "daemon",
+    "type": "camera",
+    "messagebox": true,
+    "adminUI": {
+      "config": "json"
+    },
+    "adminTab": {
+      "name": "Blink Kameras",
+      "link": "tab.html",
+      "fa-icon": "video-camera"
+    }
+  },
+  "native": {
+    "email": "",
+    "password": "",
+    "pin": "",
+    "pollingInterval": 30,
+    "snapshotPollingInterval": 60,
+    "saveSnapshots": true,
+    "snapshotPath": ""
+  },
+  "objects": [],
+  "instanceObjects": [
+    {
+      "_id": "info",
+      "type": "channel",
+      "common": {
+        "name": "Information"
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.connection",
+      "type": "state",
+      "common": {
+        "name": "Connected to Blink",
+        "type": "boolean",
+        "role": "indicator.connected",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
+    }
+  ]
+}

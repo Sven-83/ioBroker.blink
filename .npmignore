@@ -1,0 +1,5 @@
+.git
+.github
+test
+*.test.js
+*.spec.js
