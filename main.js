@@ -78,23 +78,26 @@ class BlinkAdapter extends utils.Adapter {
     // ─── Authentication ───────────────────────────────────────────────────────
 
     async login() {
-        this.log.info('Logging in to Blink...');
-        try {
-            const resp = await axios.post(`${DEFAULT_BASE_URL}/api/v5/account/login`, {
-                email: this.config.email,
-                password: this.config.password,
-                unique_id: this.getUniqueId(),
-                device_identifier: 'ioBroker-blink-adapter',
-                client_name: 'ioBroker',
-                reauth: true,
-            }, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'app-build': '9.53.0 (1)',
-                    'User-Agent': 'Mozilla/5.0',
-                },
-                timeout: 15000,
-            });
+    this.log.info('Logging in to Blink...');
+    try {
+        const resp = await axios.post(`${DEFAULT_BASE_URL}/api/v5/account/login`, {
+            email: this.config.email,
+            password: this.config.password,
+            unique_id: this.getUniqueId(),
+            device_identifier: 'ioBroker-blink-adapter',
+            client_name: 'ioBroker',
+            reauth: true,
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'app-build': '9.53.0 (1)',
+                'User-Agent': 'Mozilla/5.0',
+                'Accept': 'application/json',
+                'locale': 'de_DE',
+                'x-blink-time-zone': 'Europe/Berlin',
+            },
+            timeout: 15000,
+        });
 
             const data = resp.data;
             const region = data.account && data.account.tier;
@@ -680,30 +683,33 @@ class BlinkAdapter extends utils.Adapter {
 
     // ─── HTTP Helper ──────────────────────────────────────────────────────────
 
-    async blinkRequest(method, endpoint, body = null) {
-        if (!this.authData) throw new Error('Not authenticated');
+async blinkRequest(method, endpoint, body = null) {
+    if (!this.authData) throw new Error('Not authenticated');
 
-        const url = `${this.authData.baseUrl}${endpoint}`;
-        const headers = {
-            'TOKEN_AUTH': this.authData.token,
-            'Content-Type': 'application/json',
-            'app-build': '9.53.0 (1)',
-            'User-Agent': 'Mozilla/5.0',
-        };
+    const url = `${this.authData.baseUrl}${endpoint}`;
+    const headers = {
+        'TOKEN_AUTH': this.authData.token,
+        'Content-Type': 'application/json',
+        'app-build': '9.53.0 (1)',
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/json',
+        'locale': 'de_DE',
+        'x-blink-time-zone': 'Europe/Berlin',
+    };
 
-        const config = { headers, timeout: 15000 };
-        let resp;
+    const config = { headers, timeout: 15000 };
+    let resp;
 
-        if (method === 'get') {
-            resp = await axios.get(url, config);
-        } else if (method === 'post') {
-            resp = await axios.post(url, body || {}, config);
-        } else if (method === 'delete') {
-            resp = await axios.delete(url, config);
-        }
-
-        return resp.data;
+    if (method === 'get') {
+        resp = await axios.get(url, config);
+    } else if (method === 'post') {
+        resp = await axios.post(url, body || {}, config);
+    } else if (method === 'delete') {
+        resp = await axios.delete(url, config);
     }
+
+    return resp.data;
+}
 
     async downloadImageAsBase64(url) {
         try {
