@@ -1,79 +1,104 @@
 'use strict';
 
-const utils = require('@iobroker/adapter-core');
-const axios = require('axios');
+const utils  = require('@iobroker/adapter-core');
+const axios  = require('axios');
 const crypto = require('crypto');
-const http = require('http');
-const url = require('url');
 
-const DEFAULT_BASE_URL = 'https://rest-prod.immedia-semi.com';
-const BLINK_BASE_URLS = {
-    'prod': 'https://rest-prod.immedia-semi.com',
-    'e001': 'https://rest-e001.immedia-semi.com',
-    'e002': 'https://rest-e002.immedia-semi.com',
-    'u011': 'https://rest-u011.immedia-semi.com',
-    'u021': 'https://rest-u021.immedia-semi.com',
-    'e006': 'https://rest-e006.immedia-semi.com',
+const OAUTH_BASE_URL      = 'https://api.oauth.blink.com';
+const OAUTH_AUTHORIZE_URL = `${OAUTH_BASE_URL}/oauth/v2/authorize`;
+const OAUTH_SIGNIN_URL    = `${OAUTH_BASE_URL}/oauth/v2/signin`;
+const OAUTH_2FA_URL       = `${OAUTH_BASE_URL}/oauth/v2/2fa/verify`;
+const OAUTH_TOKEN_URL     = `${OAUTH_BASE_URL}/oauth/token`;
+const OAUTH_V2_CLIENT_ID  = 'ios';
+const OAUTH_REDIRECT_URI  = 'immedia-blink://applinks.blink.com/signin/callback';
+const TIER_ENDPOINT       = 'https://rest-prod.immedia-semi.com/api/v1/users/tier_info';
+const OAUTH_USER_AGENT    = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1';
+const OAUTH_TOKEN_UA      = 'Blink/2511191620 CFNetwork/3860.200.71 Darwin/25.1.0';
+const DEFAULT_BASE_URL    = 'https://rest-prod.immedia-semi.com';
+const BLINK_BASE_URLS     = {
+    prod: 'https://rest-prod.immedia-semi.com',
+    e001: 'https://rest-e001.immedia-semi.com',
+    e002: 'https://rest-e002.immedia-semi.com',
+    e006: 'https://rest-e006.immedia-semi.com',
+    u011: 'https://rest-u011.immedia-semi.com',
+    u021: 'https://rest-u021.immedia-semi.com',
 };
 
-// OAuth2 PKCE constants (from iOS app reverse engineering, Nov 2025)
-const OAUTH_CLIENT_ID     = 'blink_android';
-const OAUTH_REDIRECT_URI  = 'blink://oauth_callback';
-const OAUTH_AUTH_URL      = 'https://rest-prod.immedia-semi.com/api/v6/account/oauth/authorize';
-const OAUTH_TOKEN_URL     = 'https://rest-prod.immedia-semi.com/api/v6/account/oauth/token';
-const LOCAL_CALLBACK_PORT = 7654;
+function generatePKCE() {
+    const verifier  = crypto.randomBytes(32).toString('base64url');
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+    return { verifier, challenge };
+}
+
+function generateHardwareId() {
+    return crypto.randomUUID().toUpperCase();
+}
+
+function extractCsrfToken(html) {
+    const patterns = [
+        /oauth-args['"]\s*[^>]*>([^<]+)/,
+        /name=["']csrf-token["']\s+content=["']([^"']+)["']/,
+        /name=["']csrf-token["'][^>]*value=["']([^"']+)["']/,
+        /"csrf_token"\s*:\s*"([^"]+)"/,
+        /csrf.token['"]\s*:\s*['"]([^'"]+)['"]/,
+    ];
+    for (const p of patterns) {
+        const m = html.match(p);
+        if (m) {
+            if (p === patterns[0]) {
+                try { const j = JSON.parse(m[1]); if (j.csrf_token) return j.csrf_token; } catch (_) {}
+            } else {
+                return m[1];
+            }
+        }
+    }
+    return null;
+}
 
 class BlinkAdapter extends utils.Adapter {
     constructor(options) {
         super({ ...options, name: 'blink' });
-
         this.authData          = null;
         this.pollingTimer      = null;
         this.weeklyTimer       = null;
         this.snapshotRunning   = false;
         this.thumbnailUrlCache = {};
         this.lastVideoCache    = {};
-        this._oauthServer      = null;
-        this._oauthResolve     = null;
-
+        this.axiosSession      = axios.create({ timeout: 15000 });
         this.on('ready',       this.onReady.bind(this));
         this.on('stateChange', this.onStateChange.bind(this));
         this.on('message',     this.onMessage.bind(this));
         this.on('unload',      this.onUnload.bind(this));
     }
 
-    // ─── Lifecycle ────────────────────────────────────────────────────────────
-
     async onReady() {
         this.setState('info.connection', false, true);
-
         if (!this.config.email || !this.config.password) {
-            this.log.error('Email and password must be configured in adapter settings.');
+            this.log.error('Email und Passwort muessen konfiguriert werden.');
             return;
         }
+        const sToken   = await this.getStateAsync('auth.accessToken');
+        const sRefresh = await this.getStateAsync('auth.refreshToken');
+        const sHwId    = await this.getStateAsync('auth.hardwareId');
+        const sAccount = await this.getStateAsync('auth.accountId');
+        const sHost    = await this.getStateAsync('auth.host');
 
-        // Try restored token first
-        const savedToken = await this.getStateAsync('auth.accessToken');
-        const savedRefresh = await this.getStateAsync('auth.refreshToken');
-        const savedAccountId = await this.getStateAsync('auth.accountId');
-        const savedBaseUrl = await this.getStateAsync('auth.baseUrl');
-
-        if (savedToken && savedToken.val && savedAccountId && savedAccountId.val) {
+        if (sToken && sToken.val && sAccount && sAccount.val) {
             this.authData = {
-                accessToken:  savedToken.val,
-                refreshToken: savedRefresh ? savedRefresh.val : null,
-                accountId:    savedAccountId.val,
-                baseUrl:      savedBaseUrl ? savedBaseUrl.val : DEFAULT_BASE_URL,
+                accessToken:  sToken.val,
+                refreshToken: sRefresh ? sRefresh.val : null,
+                hardwareId:   sHwId    ? sHwId.val    : generateHardwareId(),
+                accountId:    sAccount.val,
+                host:         sHost    ? sHost.val    : DEFAULT_BASE_URL,
             };
-            this.log.info('Restored saved Blink OAuth token.');
+            this.log.info('Gespeichertes Blink-Token wiederhergestellt.');
             const ok = await this.verifyToken();
             if (!ok) {
-                // Try refresh first
-                const refreshed = await this.refreshAccessToken();
-                if (!refreshed) {
-                    this.authData = null;
-                    await this.loginOAuth();
-                }
+                const refreshed = this.authData.refreshToken ? await this.refreshAccessToken() : false;
+                if (!refreshed) { this.authData = null; await this.loginOAuth(); }
+            } else {
+                this.setState('info.connection', true, true);
+                this.startPolling();
             }
         } else {
             await this.loginOAuth();
@@ -84,275 +109,207 @@ class BlinkAdapter extends utils.Adapter {
         try {
             if (this.pollingTimer) clearInterval(this.pollingTimer);
             if (this.weeklyTimer)  clearTimeout(this.weeklyTimer);
-            if (this._oauthServer) this._oauthServer.close();
-        } catch (e) { /* ignore */ }
+        } catch (_) {}
         callback();
     }
 
-    // ─── OAuth2 PKCE Login ────────────────────────────────────────────────────
-
-    generatePKCE() {
-        const verifier  = crypto.randomBytes(32).toString('base64url');
-        const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-        return { verifier, challenge };
-    }
-
     async loginOAuth() {
-        this.log.info('Starting Blink OAuth2 PKCE login...');
-
-        const { verifier, challenge } = this.generatePKCE();
-        const state = crypto.randomBytes(16).toString('hex');
-
-        // Build authorization URL
-        const authUrl = `${OAUTH_AUTH_URL}?` + new URLSearchParams({
-            response_type:         'code',
-            client_id:             OAUTH_CLIENT_ID,
-            redirect_uri:          `http://localhost:${LOCAL_CALLBACK_PORT}/callback`,
-            scope:                 'openid email offline_access',
-            state:                 state,
-            code_challenge:        challenge,
-            code_challenge_method: 'S256',
-            login_hint:            this.config.email,
-        }).toString();
-
-        this.log.warn('=== BLINK OAUTH LOGIN REQUIRED ===');
-        this.log.warn(`Please open this URL in your browser to log in:`);
-        this.log.warn(authUrl);
-        this.log.warn(`Waiting for OAuth callback on port ${LOCAL_CALLBACK_PORT}...`);
-
-        // Also store the URL as a state so it can be retrieved via Admin
-        await this.setObjectNotExistsAsync('auth.loginUrl', {
-            type: 'state',
-            common: { name: 'OAuth Login URL', type: 'string', role: 'url', read: true, write: false },
-            native: {},
-        });
-        await this.setStateAsync('auth.loginUrl', { val: authUrl, ack: true });
-
+        this.log.info('Starte Blink OAuth2 Login...');
+        const hardwareId = (this.authData && this.authData.hardwareId) || generateHardwareId();
+        const { verifier, challenge } = generatePKCE();
         try {
-            const code = await this.waitForOAuthCallback(state);
-            await this.exchangeCodeForToken(code, verifier);
+            await this.oauthAuthorizeRequest(hardwareId, challenge);
+            const csrfToken = await this.oauthGetCsrfToken();
+            if (!csrfToken) throw new Error('CSRF Token nicht gefunden');
+            const loginResult = await this.oauthSignin(csrfToken);
+            if (loginResult === '2FA_REQUIRED') {
+                this._pendingCsrf     = csrfToken;
+                this._pendingVerifier = verifier;
+                this._pendingHwId     = hardwareId;
+                this.log.warn('Blink 2FA erforderlich. Sende PIN per: sendTo("blink.0", "verifyPin", {pin: "123456"})');
+                return;
+            }
+            if (loginResult !== 'SUCCESS') throw new Error('Login fehlgeschlagen');
+            const code = await this.oauthGetCode();
+            if (!code) throw new Error('Authorization Code nicht erhalten');
+            const tokenData = await this.oauthExchangeCode(code, verifier, hardwareId);
+            if (!tokenData) throw new Error('Token-Austausch fehlgeschlagen');
+            await this.processTokenData(tokenData, hardwareId);
+            this.log.info('Blink OAuth2 Login erfolgreich.');
         } catch (err) {
-            this.log.error(`OAuth login failed: ${err.message}`);
+            this.log.error(`OAuth Login Fehler: ${err.message}`);
             this.setState('info.connection', false, true);
         }
     }
 
-    waitForOAuthCallback(expectedState) {
-        return new Promise((resolve, reject) => {
-            this._oauthResolve = resolve;
-            const timeout = setTimeout(() => {
-                if (this._oauthServer) this._oauthServer.close();
-                reject(new Error('OAuth callback timeout after 5 minutes'));
-            }, 5 * 60 * 1000);
-
-            this._oauthServer = http.createServer((req, res) => {
-                const parsed = url.parse(req.url, true);
-                if (parsed.pathname !== '/callback') {
-                    res.end('Not found');
-                    return;
-                }
-
-                const { code, state, error } = parsed.query;
-
-                if (error) {
-                    res.end(`<html><body><h2>Login failed: ${error}</h2></body></html>`);
-                    clearTimeout(timeout);
-                    this._oauthServer.close();
-                    reject(new Error(`OAuth error: ${error}`));
-                    return;
-                }
-
-                if (state !== expectedState) {
-                    res.end(`<html><body><h2>Invalid state parameter</h2></body></html>`);
-                    clearTimeout(timeout);
-                    this._oauthServer.close();
-                    reject(new Error('OAuth state mismatch'));
-                    return;
-                }
-
-                res.end(`<html><body><h2>Login successful!</h2><p>You can close this window.</p></body></html>`);
-                clearTimeout(timeout);
-                this._oauthServer.close();
-                resolve(code);
-            });
-
-            this._oauthServer.listen(LOCAL_CALLBACK_PORT, () => {
-                this.log.info(`OAuth callback server listening on port ${LOCAL_CALLBACK_PORT}`);
-            });
-
-            this._oauthServer.on('error', (err) => {
-                clearTimeout(timeout);
-                reject(new Error(`OAuth server error: ${err.message}`));
-            });
+    async oauthAuthorizeRequest(hardwareId, codeChallenge) {
+        const params = new URLSearchParams({
+            app_brand: 'blink', app_version: '50.1', client_id: OAUTH_V2_CLIENT_ID,
+            code_challenge: codeChallenge, code_challenge_method: 'S256',
+            device_brand: 'Apple', device_model: 'iPhone16,1', device_os: 'iOS',
+            device_os_version: '18.7', hardware_id: hardwareId,
+            redirect_uri: OAUTH_REDIRECT_URI, response_type: 'code', scope: 'openid offline_access',
+        });
+        await this.axiosSession.get(`${OAUTH_AUTHORIZE_URL}?${params}`, {
+            headers: { 'User-Agent': OAUTH_USER_AGENT }, maxRedirects: 5,
         });
     }
 
-    async exchangeCodeForToken(code, verifier) {
-        this.log.info('Exchanging OAuth code for token...');
+    async oauthGetCsrfToken() {
+        const resp = await this.axiosSession.get(OAUTH_SIGNIN_URL, {
+            headers: { 'User-Agent': OAUTH_USER_AGENT, 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+        });
+        return extractCsrfToken(resp.data);
+    }
+
+    async oauthSignin(csrfToken) {
+        const data = new URLSearchParams({
+            username: this.config.email, password: this.config.password, 'csrf-token': csrfToken,
+        });
         try {
-            const resp = await axios.post(OAUTH_TOKEN_URL, new URLSearchParams({
-                grant_type:    'authorization_code',
-                client_id:     OAUTH_CLIENT_ID,
-                code:          code,
-                redirect_uri:  `http://localhost:${LOCAL_CALLBACK_PORT}/callback`,
-                code_verifier: verifier,
-            }).toString(), {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent':   'Blink/10.12.0 (iPhone; iOS 17.0)',
-                },
-                timeout: 15000,
+            const resp = await this.axiosSession.post(OAUTH_SIGNIN_URL, data.toString(), {
+                headers: { 'User-Agent': OAUTH_USER_AGENT, 'Content-Type': 'application/x-www-form-urlencoded', 'Origin': 'https://api.oauth.blink.com', 'Referer': OAUTH_SIGNIN_URL },
+                maxRedirects: 0, validateStatus: s => s < 500,
             });
-
-            const data = resp.data;
-            await this.processTokenResponse(data);
-
+            if (resp.status === 412) return '2FA_REQUIRED';
+            if ([200,301,302,303,307,308].includes(resp.status)) return 'SUCCESS';
+            return null;
         } catch (err) {
-            this.log.error(`Token exchange failed: ${err.message}`);
+            if (err.response && err.response.status === 412) return '2FA_REQUIRED';
+            if (err.response && [301,302,303].includes(err.response.status)) return 'SUCCESS';
             throw err;
         }
     }
 
-    async refreshAccessToken() {
-        if (!this.authData || !this.authData.refreshToken) return false;
-        this.log.info('Refreshing Blink access token...');
-        try {
-            const resp = await axios.post(OAUTH_TOKEN_URL, new URLSearchParams({
-                grant_type:    'refresh_token',
-                client_id:     OAUTH_CLIENT_ID,
-                refresh_token: this.authData.refreshToken,
-            }).toString(), {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent':   'Blink/10.12.0 (iPhone; iOS 17.0)',
-                },
-                timeout: 15000,
-            });
+    async oauthVerify2fa(csrfToken, pin) {
+        const data = new URLSearchParams({ '2fa_code': pin, 'csrf-token': csrfToken, remember_me: 'false' });
+        const resp = await this.axiosSession.post(OAUTH_2FA_URL, data.toString(), {
+            headers: { 'User-Agent': OAUTH_USER_AGENT, 'Content-Type': 'application/x-www-form-urlencoded', 'Origin': 'https://api.oauth.blink.com', 'Referer': OAUTH_SIGNIN_URL },
+            validateStatus: s => s < 500,
+        });
+        if (resp.status === 201) { try { return resp.data.status === 'auth-completed'; } catch (_) {} }
+        return false;
+    }
 
-            await this.processTokenResponse(resp.data);
-            this.log.info('Token refreshed successfully.');
-            return true;
+    async oauthGetCode() {
+        try {
+            const resp = await this.axiosSession.get(OAUTH_AUTHORIZE_URL, {
+                headers: { 'User-Agent': OAUTH_USER_AGENT, 'Referer': OAUTH_SIGNIN_URL },
+                maxRedirects: 0, validateStatus: s => s < 500,
+            });
+            const loc = resp.headers['location'];
+            if (loc) { const m = loc.match(/[?&]code=([^&]+)/); if (m) return decodeURIComponent(m[1]); }
+            return null;
         } catch (err) {
-            this.log.warn(`Token refresh failed: ${err.message}`);
-            return false;
+            if (err.response && err.response.headers && err.response.headers['location']) {
+                const m = err.response.headers['location'].match(/[?&]code=([^&]+)/);
+                if (m) return decodeURIComponent(m[1]);
+            }
+            throw err;
         }
     }
 
-    async processTokenResponse(data) {
-        // After token exchange, get account info
-        const tempToken = data.access_token;
-        let accountId = null;
-        let baseUrl = DEFAULT_BASE_URL;
+    async oauthExchangeCode(code, verifier, hardwareId) {
+        const data = new URLSearchParams({
+            grant_type: 'authorization_code', client_id: OAUTH_V2_CLIENT_ID,
+            code, code_verifier: verifier, redirect_uri: OAUTH_REDIRECT_URI, hardware_id: hardwareId,
+        });
+        const resp = await this.axiosSession.post(OAUTH_TOKEN_URL, data.toString(), {
+            headers: { 'User-Agent': OAUTH_TOKEN_UA, 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': '*/*' },
+        });
+        return resp.data;
+    }
 
+    async refreshAccessToken() {
+        if (!this.authData || !this.authData.refreshToken) return false;
+        this.log.info('Erneuere Blink Access Token...');
         try {
-            const accountResp = await axios.get(`${DEFAULT_BASE_URL}/api/v3/account/info`, {
-                headers: {
-                    'Authorization': `Bearer ${tempToken}`,
-                    'User-Agent':    'Blink/10.12.0 (iPhone; iOS 17.0)',
-                },
-                timeout: 15000,
+            const data = new URLSearchParams({
+                grant_type: 'refresh_token', client_id: OAUTH_V2_CLIENT_ID,
+                refresh_token: this.authData.refreshToken, hardware_id: this.authData.hardwareId,
             });
-            accountId = accountResp.data.account && accountResp.data.account.id;
-            const tier = accountResp.data.account && accountResp.data.account.tier;
-            if (tier && BLINK_BASE_URLS[tier]) baseUrl = BLINK_BASE_URLS[tier];
-        } catch (e) {
-            this.log.debug(`Could not fetch account info: ${e.message}`);
-            // Try to get accountId from token payload (JWT)
-            try {
-                const payload = JSON.parse(Buffer.from(tempToken.split('.')[1], 'base64').toString());
-                accountId = payload.account_id || payload.sub;
-            } catch (_) { /* ignore */ }
-        }
+            const resp = await this.axiosSession.post(OAUTH_TOKEN_URL, data.toString(), {
+                headers: { 'User-Agent': OAUTH_TOKEN_UA, 'Content-Type': 'application/x-www-form-urlencoded' },
+            });
+            await this.processTokenData(resp.data, this.authData.hardwareId);
+            this.log.info('Token erfolgreich erneuert.');
+            return true;
+        } catch (err) { this.log.warn(`Token-Erneuerung fehlgeschlagen: ${err.message}`); return false; }
+    }
 
-        this.authData = {
-            accessToken:  tempToken,
-            refreshToken: data.refresh_token || null,
-            accountId:    accountId,
-            baseUrl:      baseUrl,
-        };
-
+    async processTokenData(tokenData, hardwareId) {
+        const accessToken  = tokenData.access_token;
+        const refreshToken = tokenData.refresh_token || null;
+        let accountId = null, host = DEFAULT_BASE_URL;
+        try {
+            const r = await this.axiosSession.get(TIER_ENDPOINT, {
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            });
+            const tier = r.data.tier;
+            accountId  = r.data.account_id;
+            if (tier && BLINK_BASE_URLS[tier]) host = BLINK_BASE_URLS[tier];
+            this.log.info(`Blink Region: ${tier}, Account ID: ${accountId}`);
+        } catch (err) { this.log.warn(`Tier-Info Fehler: ${err.message}`); }
+        this.authData = { accessToken, refreshToken, hardwareId, accountId, host };
         await this.saveAuthData();
         this.setState('info.connection', true, true);
-        this.log.info('Blink OAuth login successful.');
         this.startPolling();
     }
 
     async verifyToken() {
         try {
+            if (!this.authData || !this.authData.accountId) return false;
             await this.blinkRequest('get', `/api/v3/accounts/${this.authData.accountId}/homescreen`);
             return true;
-        } catch (err) {
-            this.log.debug('Token invalid or expired.');
-            return false;
-        }
+        } catch (_) { return false; }
     }
 
     async saveAuthData() {
-        await this.setObjectNotExistsAsync('auth', {
-            type: 'channel', common: { name: 'Auth (internal)' }, native: {},
-        });
-        const states = [
-            { id: 'auth.accessToken',  name: 'Access Token',   val: this.authData.accessToken  },
-            { id: 'auth.refreshToken', name: 'Refresh Token',  val: this.authData.refreshToken || '' },
-            { id: 'auth.accountId',    name: 'Account ID',     val: this.authData.accountId    },
-            { id: 'auth.baseUrl',      name: 'Base URL',       val: this.authData.baseUrl       },
-        ];
-        for (const s of states) {
-            await this.setObjectNotExistsAsync(s.id, {
-                type: 'state',
-                common: { name: s.name, type: 'string', role: 'text', read: true, write: false },
-                native: {},
-            });
-            await this.setStateAsync(s.id, { val: s.val, ack: true });
+        await this.setObjectNotExistsAsync('auth', { type: 'channel', common: { name: 'Auth' }, native: {} });
+        for (const [id, val] of [
+            ['auth.accessToken',  this.authData.accessToken],
+            ['auth.refreshToken', this.authData.refreshToken || ''],
+            ['auth.hardwareId',   this.authData.hardwareId],
+            ['auth.accountId',    String(this.authData.accountId || '')],
+            ['auth.host',         this.authData.host],
+        ]) {
+            await this.setObjectNotExistsAsync(id, { type: 'state', common: { name: id, type: 'string', role: 'text', read: true, write: false }, native: {} });
+            await this.setStateAsync(id, { val, ack: true });
         }
     }
 
-    // ─── Polling ──────────────────────────────────────────────────────────────
-
     startPolling() {
-        const pollInterval = (this.config.pollingInterval || 30) * 1000;
+        const ms = (this.config.pollingInterval || 30) * 1000;
         this.fetchAllData();
-        this.pollingTimer = setInterval(() => this.fetchAllData(), pollInterval);
+        this.pollingTimer = setInterval(() => this.fetchAllData(), ms);
         this.scheduleWeeklySnapshot();
-        this.log.info('Polling started.');
+        this.log.info('Polling gestartet.');
     }
 
     scheduleWeeklySnapshot() {
         const ms = this.msUntilNextSaturday12();
-        this.weeklyTimer = setTimeout(async () => {
-            this.log.info('Weekly Saturday snapshot...');
-            await this.fetchAllSnapshots('weekly');
-            this.scheduleWeeklySnapshot();
-        }, ms);
+        this.weeklyTimer = setTimeout(async () => { await this.fetchAllSnapshots('weekly'); this.scheduleWeeklySnapshot(); }, ms);
     }
 
     msUntilNextSaturday12() {
-        const now = new Date();
-        const target = new Date(now);
-        let daysUntilSat = (6 - now.getDay() + 7) % 7;
-        if (daysUntilSat === 0 && now.getHours() >= 12) daysUntilSat = 7;
-        target.setDate(now.getDate() + daysUntilSat);
-        target.setHours(12, 0, 0, 0);
-        return target.getTime() - now.getTime();
+        const now = new Date(), t = new Date(now);
+        let d = (6 - now.getDay() + 7) % 7;
+        if (d === 0 && now.getHours() >= 12) d = 7;
+        t.setDate(now.getDate() + d); t.setHours(12, 0, 0, 0);
+        return t.getTime() - now.getTime();
     }
 
     async fetchAllData() {
-        if (!this.authData) return;
+        if (!this.authData || !this.authData.accountId) return;
         try {
             const data = await this.blinkRequest('get', `/api/v3/accounts/${this.authData.accountId}/homescreen`);
             this.setState('info.connection', true, true);
             await this.processHomescreenData(data);
         } catch (err) {
-            this.log.warn(`Error fetching Blink data: ${err.message}`);
-            if (err.response && (err.response.status === 401 || err.response.status === 403)) {
-                this.log.info('Token expired, attempting refresh...');
-                const refreshed = await this.refreshAccessToken();
-                if (!refreshed) {
-                    this.authData = null;
-                    this.setState('info.connection', false, true);
-                    if (this.pollingTimer) clearInterval(this.pollingTimer);
-                    await this.loginOAuth();
-                }
+            this.log.warn(`Datenabruf Fehler: ${err.message}`);
+            if (err.response && [401, 403].includes(err.response.status)) {
+                const r = await this.refreshAccessToken();
+                if (!r) { this.authData = null; this.setState('info.connection', false, true); if (this.pollingTimer) clearInterval(this.pollingTimer); await this.loginOAuth(); }
             }
         }
     }
@@ -362,324 +319,184 @@ class BlinkAdapter extends utils.Adapter {
         this.snapshotRunning = true;
         try {
             const data = await this.blinkRequest('get', `/api/v3/accounts/${this.authData.accountId}/homescreen`);
-            const cameras = [
-                ...(data.cameras   || []),
-                ...(data.owls      || []),
-                ...(data.doorbells || []),
-            ];
-            for (const cam of cameras) {
-                await this.triggerCameraSnapshot(cam.network_id, cam.id, cam.name);
-                await this.sleep(3000);
-            }
+            const cams = [...(data.cameras||[]), ...(data.owls||[]), ...(data.doorbells||[])];
+            for (const c of cams) { await this.triggerSnapshot(c.network_id, c.id, c.name); await this.sleep(3000); }
             await this.fetchAllData();
-        } catch (err) {
-            this.log.warn(`Snapshot cycle error (${reason}): ${err.message}`);
-        } finally {
-            this.snapshotRunning = false;
-        }
+        } catch (err) { this.log.warn(`Snapshot Fehler (${reason}): ${err.message}`); }
+        finally { this.snapshotRunning = false; }
     }
 
-    // ─── Data Processing ──────────────────────────────────────────────────────
-
     async processHomescreenData(data) {
-        if (data.networks) {
-            for (const net of data.networks) {
-                await this.createNetworkObjects(net);
-                await this.updateNetworkStates(net);
-            }
-        }
-        if (data.cameras) {
-            for (const cam of data.cameras) {
-                await this.createCameraObjects(cam.network_id, cam);
-                await this.updateCameraStates(cam.network_id, cam);
-            }
-        }
-        if (data.owls) {
-            for (const owl of data.owls) {
-                await this.createCameraObjects(owl.network_id, owl, true);
-                await this.updateCameraStates(owl.network_id, owl, true);
-            }
-        }
-        if (data.doorbells) {
-            for (const db of data.doorbells) {
-                await this.createCameraObjects(db.network_id, db, false, true);
-                await this.updateCameraStates(db.network_id, db, false, true);
-            }
-        }
-        if (data.videos) {
-            for (const vid of data.videos) await this.processVideoEvent(vid);
-            await this.checkMotionAndSnapshot(data);
-        }
+        for (const n of (data.networks||[])) { await this.createNetworkObjects(n); await this.updateNetworkStates(n); }
+        for (const c of (data.cameras||[])) { await this.createCameraObjects(c.network_id, c); await this.updateCameraStates(c.network_id, c); }
+        for (const o of (data.owls||[])) { await this.createCameraObjects(o.network_id, o, true); await this.updateCameraStates(o.network_id, o); }
+        for (const d of (data.doorbells||[])) { await this.createCameraObjects(d.network_id, d, false, true); await this.updateCameraStates(d.network_id, d); }
+        for (const v of (data.videos||[])) await this.processVideoEvent(v);
+        await this.checkMotionAndSnapshot(data);
     }
 
     async checkMotionAndSnapshot(data) {
-        if (!data.videos || data.videos.length === 0) return;
-        const armedNetworks = new Set(
-            (data.networks || []).filter(n => n.armed).map(n => String(n.id))
-        );
-        const needSnapshot = [];
-        for (const vid of data.videos) {
-            const netId = String(vid.network_id);
-            const camId = String(vid.device_id || vid.camera_id);
-            if (!netId || !camId || !armedNetworks.has(netId)) continue;
-            const key = `${netId}.${camId}`;
-            if (vid.created_at && vid.created_at !== this.lastVideoCache[key]) {
-                this.lastVideoCache[key] = vid.created_at;
-                if (!needSnapshot.find(c => c.netId === netId && c.camId === camId)) {
-                    needSnapshot.push({ netId, camId, name: vid.camera_name });
-                }
+        if (!data.videos || !data.videos.length) return;
+        const armed = new Set((data.networks||[]).filter(n => n.armed).map(n => String(n.id)));
+        const need = [];
+        for (const v of data.videos) {
+            const nid = String(v.network_id), cid = String(v.device_id || v.camera_id);
+            if (!nid || !cid || !armed.has(nid)) continue;
+            const key = `${nid}.${cid}`;
+            if (v.created_at && v.created_at !== this.lastVideoCache[key]) {
+                this.lastVideoCache[key] = v.created_at;
+                if (!need.find(c => c.nid === nid && c.cid === cid)) need.push({ nid, cid, name: v.camera_name });
             }
         }
-        if (needSnapshot.length === 0 || this.snapshotRunning) return;
+        if (!need.length || this.snapshotRunning) return;
         this.snapshotRunning = true;
         try {
-            for (const cam of needSnapshot) {
-                await this.triggerCameraSnapshot(cam.netId, cam.camId, cam.name);
-                if (needSnapshot.length > 1) await this.sleep(3000);
-            }
-            await this.sleep(4000);
-            await this.fetchAllData();
-        } finally {
-            this.snapshotRunning = false;
-        }
+            for (const c of need) { await this.triggerSnapshot(c.nid, c.cid, c.name); if (need.length > 1) await this.sleep(3000); }
+            await this.sleep(4000); await this.fetchAllData();
+        } finally { this.snapshotRunning = false; }
     }
 
-    // ─── ioBroker Objects ─────────────────────────────────────────────────────
-
-    async createNetworkObjects(network) {
-        const netId = `networks.${network.id}`;
-        await this.setObjectNotExistsAsync(netId, {
-            type: 'channel', common: { name: network.name || `Network ${network.id}` }, native: {},
-        });
-        const states = [
-            { id: 'name',      name: 'Network Name', type: 'string',  role: 'text',        write: false },
-            { id: 'armed',     name: 'Armed',        type: 'boolean', role: 'switch.lock', write: true  },
-            { id: 'enabled',   name: 'Enabled',      type: 'boolean', role: 'indicator',   write: false },
-            { id: 'networkId', name: 'Network ID',   type: 'number',  role: 'value',       write: false },
-            { id: 'arm',       name: 'Arm network',  type: 'boolean', role: 'button',      write: true, def: false },
-            { id: 'disarm',    name: 'Disarm',       type: 'boolean', role: 'button',      write: true, def: false },
-        ];
-        for (const s of states) {
-            await this.setObjectNotExistsAsync(`${netId}.${s.id}`, {
-                type: 'state',
-                common: { name: s.name, type: s.type, role: s.role, read: true, write: s.write, ...(s.def !== undefined ? { def: s.def } : {}) },
-                native: {},
-            });
-        }
+    async createNetworkObjects(net) {
+        const id = `networks.${net.id}`;
+        await this.setObjectNotExistsAsync(id, { type: 'channel', common: { name: net.name || `Netzwerk ${net.id}` }, native: {} });
+        for (const s of [
+            { id: 'name', type: 'string', role: 'text', write: false },
+            { id: 'armed', type: 'boolean', role: 'switch.lock', write: true },
+            { id: 'enabled', type: 'boolean', role: 'indicator', write: false },
+            { id: 'networkId', type: 'number', role: 'value', write: false },
+            { id: 'arm', type: 'boolean', role: 'button', write: true, def: false },
+            { id: 'disarm', type: 'boolean', role: 'button', write: true, def: false },
+        ]) await this.setObjectNotExistsAsync(`${id}.${s.id}`, { type: 'state', common: { name: s.id, type: s.type, role: s.role, read: true, write: s.write, ...(s.def !== undefined ? { def: s.def } : {}) }, native: {} });
     }
 
     async createCameraObjects(networkId, cam, isMini = false, isDoorbell = false) {
-        const camId = `networks.${networkId}.cameras.${cam.id}`;
-        await this.setObjectNotExistsAsync(`networks.${networkId}.cameras`, {
-            type: 'channel', common: { name: 'Cameras' }, native: {},
-        });
-        await this.setObjectNotExistsAsync(camId, {
-            type: 'channel',
-            common: { name: `${isDoorbell ? 'Doorbell' : isMini ? 'Blink Mini' : 'Camera'}: ${cam.name || cam.id}` },
-            native: { cameraId: cam.id, networkId },
-        });
-        const states = [
-            { id: 'name',          name: 'Camera Name',          type: 'string',  role: 'text',                write: false },
-            { id: 'enabled',       name: 'Enabled',              type: 'boolean', role: 'indicator',           write: false },
-            { id: 'battery',       name: 'Battery (%)',           type: 'number',  role: 'value.battery',       write: false, unit: '%'   },
-            { id: 'temperature',   name: 'Temperature (°F)',      type: 'number',  role: 'value.temperature',   write: false, unit: '°F'  },
-            { id: 'temperatureC',  name: 'Temperature (°C)',      type: 'number',  role: 'value.temperature',   write: false, unit: '°C'  },
-            { id: 'serial',        name: 'Serial Number',         type: 'string',  role: 'text',                write: false },
-            { id: 'firmware',      name: 'Firmware',              type: 'string',  role: 'text',                write: false },
-            { id: 'online',        name: 'Online',                type: 'boolean', role: 'indicator.connected', write: false },
-            { id: 'motionAlert',   name: 'Motion Alert',          type: 'boolean', role: 'indicator.motion',    write: false },
-            { id: 'thumbnail',     name: 'Thumbnail URL',         type: 'string',  role: 'url',                 write: false },
-            { id: 'thumbnailData', name: 'Thumbnail (Base64)',    type: 'string',  role: 'url',                 write: false },
-            { id: 'snapshot',      name: 'Trigger snapshot',      type: 'boolean', role: 'button',              write: true, def: false },
-            { id: 'lastUpdated',   name: 'Last Updated',          type: 'string',  role: 'value.datetime',      write: false },
-            { id: 'wifiStrength',  name: 'WiFi Strength (dBm)',   type: 'number',  role: 'value',               write: false, unit: 'dBm' },
-        ];
-        for (const s of states) {
-            await this.setObjectNotExistsAsync(`${camId}.${s.id}`, {
-                type: 'state',
-                common: { name: s.name, type: s.type, role: s.role, read: true, write: s.write, ...(s.unit ? { unit: s.unit } : {}), ...(s.def !== undefined ? { def: s.def } : {}) },
-                native: {},
-            });
-        }
+        const base = `networks.${networkId}.cameras`, id = `${base}.${cam.id}`;
+        await this.setObjectNotExistsAsync(base, { type: 'channel', common: { name: 'Kameras' }, native: {} });
+        await this.setObjectNotExistsAsync(id, { type: 'channel', common: { name: `${isDoorbell?'Tuer':isMini?'Mini':'Kamera'}: ${cam.name||cam.id}` }, native: {} });
+        for (const s of [
+            { id: 'name', type: 'string', role: 'text', write: false },
+            { id: 'enabled', type: 'boolean', role: 'indicator', write: false },
+            { id: 'battery', type: 'number', role: 'value.battery', write: false, unit: '%' },
+            { id: 'temperature', type: 'number', role: 'value.temperature', write: false, unit: '°F' },
+            { id: 'temperatureC', type: 'number', role: 'value.temperature', write: false, unit: '°C' },
+            { id: 'serial', type: 'string', role: 'text', write: false },
+            { id: 'firmware', type: 'string', role: 'text', write: false },
+            { id: 'online', type: 'boolean', role: 'indicator.connected', write: false },
+            { id: 'motionAlert', type: 'boolean', role: 'indicator.motion', write: false },
+            { id: 'thumbnail', type: 'string', role: 'url', write: false },
+            { id: 'thumbnailData', type: 'string', role: 'url', write: false },
+            { id: 'snapshot', type: 'boolean', role: 'button', write: true, def: false },
+            { id: 'lastUpdated', type: 'string', role: 'value.datetime', write: false },
+            { id: 'wifiStrength', type: 'number', role: 'value', write: false, unit: 'dBm' },
+        ]) await this.setObjectNotExistsAsync(`${id}.${s.id}`, { type: 'state', common: { name: s.id, type: s.type, role: s.role, read: true, write: s.write, ...(s.unit?{unit:s.unit}:{}), ...(s.def!==undefined?{def:s.def}:{}) }, native: {} });
     }
 
-    // ─── State Updates ────────────────────────────────────────────────────────
-
-    async updateNetworkStates(network) {
-        const id = `networks.${network.id}`;
-        await this.setStateAsync(`${id}.name`,      { val: network.name || '',   ack: true });
-        await this.setStateAsync(`${id}.armed`,     { val: !!network.armed,      ack: true });
-        await this.setStateAsync(`${id}.enabled`,   { val: !!network.enabled,    ack: true });
-        await this.setStateAsync(`${id}.networkId`, { val: network.id,           ack: true });
+    async updateNetworkStates(net) {
+        const id = `networks.${net.id}`;
+        await this.setStateAsync(`${id}.name`,      { val: net.name||'',  ack: true });
+        await this.setStateAsync(`${id}.armed`,     { val: !!net.armed,   ack: true });
+        await this.setStateAsync(`${id}.enabled`,   { val: !!net.enabled, ack: true });
+        await this.setStateAsync(`${id}.networkId`, { val: net.id,        ack: true });
     }
 
     async updateCameraStates(networkId, cam) {
         const id = `networks.${networkId}.cameras.${cam.id}`;
-        const toC = f => f != null ? Math.round((f - 32) * 5 / 9 * 10) / 10 : null;
-
-        await this.setStateAsync(`${id}.name`,        { val: cam.name || '', ack: true });
-        await this.setStateAsync(`${id}.enabled`,     { val: cam.enabled != null ? !!cam.enabled : true, ack: true });
-        await this.setStateAsync(`${id}.serial`,      { val: cam.serial || '', ack: true });
-        await this.setStateAsync(`${id}.firmware`,    { val: cam.fw_version || cam.firmware || '', ack: true });
-        await this.setStateAsync(`${id}.online`,      { val: cam.status === 'online', ack: true });
+        const toC = f => f != null ? Math.round((f-32)*5/9*10)/10 : null;
+        await this.setStateAsync(`${id}.name`,        { val: cam.name||'', ack: true });
+        await this.setStateAsync(`${id}.enabled`,     { val: cam.enabled!=null?!!cam.enabled:true, ack: true });
+        await this.setStateAsync(`${id}.serial`,      { val: cam.serial||'', ack: true });
+        await this.setStateAsync(`${id}.firmware`,    { val: cam.fw_version||cam.firmware||'', ack: true });
+        await this.setStateAsync(`${id}.online`,      { val: cam.status==='online', ack: true });
         await this.setStateAsync(`${id}.motionAlert`, { val: !!cam.motion_alert, ack: true });
         await this.setStateAsync(`${id}.lastUpdated`, { val: new Date().toISOString(), ack: true });
-
-        if (cam.battery != null) {
-            const pct = typeof cam.battery === 'string'
-                ? (cam.battery === 'ok' ? 100 : cam.battery === 'low' ? 20 : null)
-                : cam.battery;
-            await this.setStateAsync(`${id}.battery`, { val: pct, ack: true });
-        }
-        if (cam.temperature != null) {
-            await this.setStateAsync(`${id}.temperature`,  { val: cam.temperature, ack: true });
-            await this.setStateAsync(`${id}.temperatureC`, { val: toC(cam.temperature), ack: true });
-        }
-        if (cam.signals && cam.signals.wifi != null) {
-            await this.setStateAsync(`${id}.wifiStrength`, { val: cam.signals.wifi, ack: true });
-        }
+        if (cam.battery != null) await this.setStateAsync(`${id}.battery`, { val: typeof cam.battery==='string'?(cam.battery==='ok'?100:20):cam.battery, ack: true });
+        if (cam.temperature != null) { await this.setStateAsync(`${id}.temperature`, { val: cam.temperature, ack: true }); await this.setStateAsync(`${id}.temperatureC`, { val: toC(cam.temperature), ack: true }); }
+        if (cam.signals && cam.signals.wifi != null) await this.setStateAsync(`${id}.wifiStrength`, { val: cam.signals.wifi, ack: true });
         if (cam.thumbnail) {
-            const thumbUrl = cam.thumbnail.startsWith('http')
-                ? cam.thumbnail
-                : `${this.authData.baseUrl}${cam.thumbnail}`;
-            await this.setStateAsync(`${id}.thumbnail`, { val: thumbUrl, ack: true });
-            const cacheKey = `${networkId}.${cam.id}`;
-            if (this.thumbnailUrlCache[cacheKey] !== thumbUrl) {
-                try {
-                    const imgData = await this.downloadImageAsBase64(thumbUrl);
-                    if (imgData) {
-                        await this.setStateAsync(`${id}.thumbnailData`, { val: imgData, ack: true });
-                        this.thumbnailUrlCache[cacheKey] = thumbUrl;
-                    }
-                } catch (e) { this.log.debug(`Thumbnail download failed: ${e.message}`); }
+            const url = cam.thumbnail.startsWith('http') ? cam.thumbnail : `${this.authData.host}${cam.thumbnail}`;
+            await this.setStateAsync(`${id}.thumbnail`, { val: url, ack: true });
+            const key = `${networkId}.${cam.id}`;
+            if (this.thumbnailUrlCache[key] !== url) {
+                const img = await this.downloadImage(url);
+                if (img) { await this.setStateAsync(`${id}.thumbnailData`, { val: img, ack: true }); this.thumbnailUrlCache[key] = url; }
             }
         }
     }
 
     async processVideoEvent(vid) {
-        const netId = vid.network_id;
-        const camId = vid.device_id || vid.camera_id;
+        const netId = vid.network_id, camId = vid.device_id || vid.camera_id;
         if (!netId || !camId) return;
-        const prefix = `networks.${netId}.cameras.${camId}`;
-        await this.setObjectNotExistsAsync(`${prefix}.lastVideo`, {
-            type: 'state', common: { name: 'Last Video URL', type: 'string', role: 'url', read: true, write: false }, native: {},
-        });
-        await this.setObjectNotExistsAsync(`${prefix}.lastVideoTime`, {
-            type: 'state', common: { name: 'Last Video Time', type: 'string', role: 'value.datetime', read: true, write: false }, native: {},
-        });
-        const videoUrl = vid.address
-            ? (vid.address.startsWith('http') ? vid.address : `${this.authData.baseUrl}${vid.address}`)
-            : '';
-        await this.setStateAsync(`${prefix}.lastVideo`,     { val: videoUrl,          ack: true });
-        await this.setStateAsync(`${prefix}.lastVideoTime`, { val: vid.created_at || '', ack: true });
+        const pfx = `networks.${netId}.cameras.${camId}`;
+        await this.setObjectNotExistsAsync(`${pfx}.lastVideo`, { type: 'state', common: { name: 'Letztes Video', type: 'string', role: 'url', read: true, write: false }, native: {} });
+        await this.setObjectNotExistsAsync(`${pfx}.lastVideoTime`, { type: 'state', common: { name: 'Letztes Video Zeit', type: 'string', role: 'value.datetime', read: true, write: false }, native: {} });
+        const url = vid.address ? (vid.address.startsWith('http') ? vid.address : `${this.authData.host}${vid.address}`) : '';
+        await this.setStateAsync(`${pfx}.lastVideo`,     { val: url, ack: true });
+        await this.setStateAsync(`${pfx}.lastVideoTime`, { val: vid.created_at||'', ack: true });
     }
 
-    // ─── Camera Actions ───────────────────────────────────────────────────────
-
-    async triggerCameraSnapshot(networkId, cameraId, name) {
-        try {
-            await this.blinkRequest('post',
-                `/api/v5/accounts/${this.authData.accountId}/networks/${networkId}/cameras/${cameraId}/thumbnail`
-            );
-        } catch (err) {
-            this.log.warn(`Snapshot failed for ${name || cameraId}: ${err.message}`);
-        }
+    async triggerSnapshot(networkId, cameraId, name) {
+        try { await this.blinkRequest('post', `/api/v5/accounts/${this.authData.accountId}/networks/${networkId}/cameras/${cameraId}/thumbnail`); }
+        catch (err) { this.log.warn(`Snapshot Fehler ${name||cameraId}: ${err.message}`); }
     }
 
-    async armNetwork(networkId) {
-        await this.blinkRequest('post', `/api/v1/networks/${networkId}/arm`);
-    }
-
-    async disarmNetwork(networkId) {
-        await this.blinkRequest('post', `/api/v1/networks/${networkId}/disarm`);
-    }
-
-    // ─── State Change Handler ─────────────────────────────────────────────────
+    async armNetwork(networkId) { await this.blinkRequest('post', `/api/v1/networks/${networkId}/arm`); }
+    async disarmNetwork(networkId) { await this.blinkRequest('post', `/api/v1/networks/${networkId}/disarm`); }
 
     async onStateChange(id, state) {
         if (!state || state.ack) return;
         const parts = id.replace(`${this.namespace}.`, '').split('.');
         if (parts[0] !== 'networks') return;
         const networkId = parseInt(parts[1]);
-
         if (parts[2] === 'cameras') {
             const cameraId = parseInt(parts[3]);
-            const action   = parts[4];
-            if (action === 'snapshot' && state.val) {
-                await this.triggerCameraSnapshot(networkId, cameraId);
-                await this.sleep(4000);
-                await this.fetchAllData();
-            }
+            if (parts[4] === 'snapshot' && state.val) { await this.triggerSnapshot(networkId, cameraId); await this.sleep(4000); await this.fetchAllData(); }
         } else {
             const action = parts[2];
-            if ((action === 'arm' && state.val) || (action === 'armed' && state.val)) {
-                await this.armNetwork(networkId);
-                await this.fetchAllData();
-            } else if ((action === 'disarm' && state.val) || (action === 'armed' && !state.val)) {
-                await this.disarmNetwork(networkId);
-                await this.fetchAllData();
-            }
+            if ((action === 'arm' && state.val) || (action === 'armed' && state.val === true)) { await this.armNetwork(networkId); await this.fetchAllData(); }
+            else if ((action === 'disarm' && state.val) || (action === 'armed' && state.val === false)) { await this.disarmNetwork(networkId); await this.fetchAllData(); }
         }
     }
 
-    // ─── Message Handler ──────────────────────────────────────────────────────
-
     async onMessage(obj) {
         if (!obj || !obj.command) return;
-        if (obj.command === 'getLoginUrl') {
-            const s = await this.getStateAsync('auth.loginUrl');
-            this.sendTo(obj.from, obj.command, { url: s ? s.val : null }, obj.callback);
+        if (obj.command === 'verifyPin') {
+            const pin = obj.message && obj.message.pin;
+            if (!pin || !this._pendingCsrf) { this.sendTo(obj.from, obj.command, { error: 'Kein PIN oder kein ausstehender Login' }, obj.callback); return; }
+            const ok = await this.oauthVerify2fa(this._pendingCsrf, pin);
+            if (ok) {
+                const code = await this.oauthGetCode();
+                if (code) {
+                    const tokenData = await this.oauthExchangeCode(code, this._pendingVerifier, this._pendingHwId);
+                    if (tokenData) { await this.processTokenData(tokenData, this._pendingHwId); this._pendingCsrf = null; this.sendTo(obj.from, obj.command, { success: true }, obj.callback); return; }
+                }
+            }
+            this.sendTo(obj.from, obj.command, { success: false }, obj.callback);
         } else if (obj.command === 'refreshSnapshots') {
             this.fetchAllSnapshots('manual').catch(e => this.log.warn(e.message));
             this.sendTo(obj.from, obj.command, { queued: true }, obj.callback);
         } else if (obj.command === 'getStatus') {
-            this.sendTo(obj.from, obj.command, { connected: this.authData !== null }, obj.callback);
+            this.sendTo(obj.from, obj.command, { connected: !!this.authData }, obj.callback);
         }
     }
 
-    // ─── HTTP Helper ──────────────────────────────────────────────────────────
-
     async blinkRequest(method, endpoint, body = null) {
-        if (!this.authData) throw new Error('Not authenticated');
-        const url = `${this.authData.baseUrl}${endpoint}`;
-        const headers = {
-            'Authorization': `Bearer ${this.authData.accessToken}`,
-            'Content-Type':  'application/json',
-            'User-Agent':    'Blink/10.12.0 (iPhone; iOS 17.0)',
-        };
-        const config = { headers, timeout: 15000 };
-        let resp;
-        if (method === 'get')    resp = await axios.get(url, config);
-        else if (method === 'post') resp = await axios.post(url, body || {}, config);
-        else if (method === 'delete') resp = await axios.delete(url, config);
+        if (!this.authData) throw new Error('Nicht authentifiziert');
+        const url = `${this.authData.host}${endpoint}`;
+        const headers = { 'Authorization': `Bearer ${this.authData.accessToken}`, 'Content-Type': 'application/json' };
+        const resp = method === 'get' ? await this.axiosSession.get(url, { headers }) : await this.axiosSession.post(url, body||{}, { headers });
         return resp.data;
     }
 
-    async downloadImageAsBase64(url) {
+    async downloadImage(url) {
         try {
-            const fetchUrl = (url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png')) ? url : url + '.jpg';
-            const resp = await axios.get(fetchUrl, {
-                responseType: 'arraybuffer',
-                headers: {
-                    'Authorization': `Bearer ${this.authData.accessToken}`,
-                    'User-Agent':    'Blink/10.12.0 (iPhone; iOS 17.0)',
-                },
-                timeout: 15000,
-            });
-            const base64   = Buffer.from(resp.data, 'binary').toString('base64');
-            const mimeType = resp.headers['content-type'] || 'image/jpeg';
-            return `data:${mimeType};base64,${base64}`;
-        } catch (err) {
-            this.log.debug(`Image download failed: ${err.message}`);
-            return null;
-        }
+            const fetchUrl = /\.(jpg|jpeg|png)$/i.test(url) ? url : url + '.jpg';
+            const resp = await this.axiosSession.get(fetchUrl, { responseType: 'arraybuffer', headers: { 'Authorization': `Bearer ${this.authData.accessToken}` } });
+            return `data:${resp.headers['content-type']||'image/jpeg'};base64,${Buffer.from(resp.data).toString('base64')}`;
+        } catch (_) { return null; }
     }
 
     sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 }
 
-if (require.main !== module) {
-    module.exports = (options) => new BlinkAdapter(options);
-} else {
-    new BlinkAdapter();
-}
+if (require.main !== module) { module.exports = (options) => new BlinkAdapter(options); }
+else { new BlinkAdapter(); }
