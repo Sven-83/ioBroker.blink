@@ -2,35 +2,44 @@
 
 const utils = require('@iobroker/adapter-core');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+const crypto = require('crypto');
+const http = require('http');
+const url = require('url');
 
-// Blink API base URLs per region
+const DEFAULT_BASE_URL = 'https://rest-prod.immedia-semi.com';
 const BLINK_BASE_URLS = {
     'prod': 'https://rest-prod.immedia-semi.com',
     'e001': 'https://rest-e001.immedia-semi.com',
     'e002': 'https://rest-e002.immedia-semi.com',
     'u011': 'https://rest-u011.immedia-semi.com',
+    'u021': 'https://rest-u021.immedia-semi.com',
+    'e006': 'https://rest-e006.immedia-semi.com',
 };
 
-const DEFAULT_BASE_URL = 'https://rest-prod.immedia-semi.com';
+// OAuth2 PKCE constants (from iOS app reverse engineering, Nov 2025)
+const OAUTH_CLIENT_ID     = 'blink_android';
+const OAUTH_REDIRECT_URI  = 'blink://oauth_callback';
+const OAUTH_AUTH_URL      = 'https://rest-prod.immedia-semi.com/api/v6/account/oauth/authorize';
+const OAUTH_TOKEN_URL     = 'https://rest-prod.immedia-semi.com/api/v6/account/oauth/token';
+const LOCAL_CALLBACK_PORT = 7654;
 
 class BlinkAdapter extends utils.Adapter {
     constructor(options) {
         super({ ...options, name: 'blink' });
 
-        this.authData = null;           // { token, accountId, clientId, baseUrl }
-        this.pollingTimer = null;
-        this.weeklyTimer = null;
-        this.pinPending = false;
-        this.thumbnailUrlCache = {};    // "netId.camId" → last downloaded URL
-        this.lastVideoCache = {};       // "netId.camId" → created_at of last known video
-        this.snapshotRunning = false;   // prevent overlapping snapshot cycles
+        this.authData          = null;
+        this.pollingTimer      = null;
+        this.weeklyTimer       = null;
+        this.snapshotRunning   = false;
+        this.thumbnailUrlCache = {};
+        this.lastVideoCache    = {};
+        this._oauthServer      = null;
+        this._oauthResolve     = null;
 
-        this.on('ready', this.onReady.bind(this));
+        this.on('ready',       this.onReady.bind(this));
         this.on('stateChange', this.onStateChange.bind(this));
-        this.on('message', this.onMessage.bind(this));
-        this.on('unload', this.onUnload.bind(this));
+        this.on('message',     this.onMessage.bind(this));
+        this.on('unload',      this.onUnload.bind(this));
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -43,27 +52,31 @@ class BlinkAdapter extends utils.Adapter {
             return;
         }
 
-        // Try to restore saved auth token
-        const savedAuth = await this.getStateAsync('auth.token');
+        // Try restored token first
+        const savedToken = await this.getStateAsync('auth.accessToken');
+        const savedRefresh = await this.getStateAsync('auth.refreshToken');
         const savedAccountId = await this.getStateAsync('auth.accountId');
-        const savedClientId = await this.getStateAsync('auth.clientId');
         const savedBaseUrl = await this.getStateAsync('auth.baseUrl');
 
-        if (savedAuth && savedAuth.val && savedAccountId && savedAccountId.val) {
+        if (savedToken && savedToken.val && savedAccountId && savedAccountId.val) {
             this.authData = {
-                token: savedAuth.val,
-                accountId: savedAccountId.val,
-                clientId: savedClientId ? savedClientId.val : null,
-                baseUrl: savedBaseUrl ? savedBaseUrl.val : DEFAULT_BASE_URL,
+                accessToken:  savedToken.val,
+                refreshToken: savedRefresh ? savedRefresh.val : null,
+                accountId:    savedAccountId.val,
+                baseUrl:      savedBaseUrl ? savedBaseUrl.val : DEFAULT_BASE_URL,
             };
-            this.log.info('Restored saved Blink session token.');
+            this.log.info('Restored saved Blink OAuth token.');
             const ok = await this.verifyToken();
             if (!ok) {
-                this.authData = null;
-                await this.login();
+                // Try refresh first
+                const refreshed = await this.refreshAccessToken();
+                if (!refreshed) {
+                    this.authData = null;
+                    await this.loginOAuth();
+                }
             }
         } else {
-            await this.login();
+            await this.loginOAuth();
         }
     }
 
@@ -71,87 +84,197 @@ class BlinkAdapter extends utils.Adapter {
         try {
             if (this.pollingTimer) clearInterval(this.pollingTimer);
             if (this.weeklyTimer)  clearTimeout(this.weeklyTimer);
+            if (this._oauthServer) this._oauthServer.close();
         } catch (e) { /* ignore */ }
         callback();
     }
 
-    // ─── Authentication ───────────────────────────────────────────────────────
+    // ─── OAuth2 PKCE Login ────────────────────────────────────────────────────
 
-    async login() {
-    this.log.info('Logging in to Blink...');
-    try {
-        const resp = await axios.post(`${DEFAULT_BASE_URL}/api/v5/account/login`, {
-            email: this.config.email,
-            password: this.config.password,
-            unique_id: this.getUniqueId(),
-            device_identifier: 'ioBroker-blink-adapter',
-            client_name: 'ioBroker',
-            reauth: true,
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'app-build': '9.53.0 (1)',
-                'User-Agent': 'Mozilla/5.0',
-                'Accept': 'application/json',
-                'locale': 'de_DE',
-                'x-blink-time-zone': 'Europe/Berlin',
-            },
-            timeout: 15000,
+    generatePKCE() {
+        const verifier  = crypto.randomBytes(32).toString('base64url');
+        const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+        return { verifier, challenge };
+    }
+
+    async loginOAuth() {
+        this.log.info('Starting Blink OAuth2 PKCE login...');
+
+        const { verifier, challenge } = this.generatePKCE();
+        const state = crypto.randomBytes(16).toString('hex');
+
+        // Build authorization URL
+        const authUrl = `${OAUTH_AUTH_URL}?` + new URLSearchParams({
+            response_type:         'code',
+            client_id:             OAUTH_CLIENT_ID,
+            redirect_uri:          `http://localhost:${LOCAL_CALLBACK_PORT}/callback`,
+            scope:                 'openid email offline_access',
+            state:                 state,
+            code_challenge:        challenge,
+            code_challenge_method: 'S256',
+            login_hint:            this.config.email,
+        }).toString();
+
+        this.log.warn('=== BLINK OAUTH LOGIN REQUIRED ===');
+        this.log.warn(`Please open this URL in your browser to log in:`);
+        this.log.warn(authUrl);
+        this.log.warn(`Waiting for OAuth callback on port ${LOCAL_CALLBACK_PORT}...`);
+
+        // Also store the URL as a state so it can be retrieved via Admin
+        await this.setObjectNotExistsAsync('auth.loginUrl', {
+            type: 'state',
+            common: { name: 'OAuth Login URL', type: 'string', role: 'url', read: true, write: false },
+            native: {},
         });
+        await this.setStateAsync('auth.loginUrl', { val: authUrl, ack: true });
 
-            const data = resp.data;
-            const region = data.account && data.account.tier;
-            const baseUrl = (region && BLINK_BASE_URLS[region]) || DEFAULT_BASE_URL;
-
-            this.authData = {
-                token: data.auth.token,
-                accountId: data.account.id,
-                clientId: data.client ? data.client.id : null,
-                baseUrl,
-            };
-
-            // Save token for later restores
-            await this.saveAuthData();
-
-            if (data.client && data.client.verification_required) {
-                this.pinPending = true;
-                this.log.warn('Blink requires 2-factor authentication. Send PIN via adapter message or configure in settings.');
-
-                // Auto-use pin from config if provided
-                if (this.config.pin && this.config.pin.length > 0) {
-                    await this.verifyPin(this.config.pin);
-                } else {
-                    this.log.warn('Set your 2FA PIN in the adapter config and restart, or send it via message.');
-                }
-                return;
-            }
-
-            this.log.info('Blink login successful.');
-            this.setState('info.connection', true, true);
-            this.startPolling();
-
+        try {
+            const code = await this.waitForOAuthCallback(state);
+            await this.exchangeCodeForToken(code, verifier);
         } catch (err) {
-            this.log.error(`Blink login failed: ${err.message}`);
+            this.log.error(`OAuth login failed: ${err.message}`);
             this.setState('info.connection', false, true);
         }
     }
 
-    async verifyPin(pin) {
-        if (!this.authData) return false;
+    waitForOAuthCallback(expectedState) {
+        return new Promise((resolve, reject) => {
+            this._oauthResolve = resolve;
+            const timeout = setTimeout(() => {
+                if (this._oauthServer) this._oauthServer.close();
+                reject(new Error('OAuth callback timeout after 5 minutes'));
+            }, 5 * 60 * 1000);
+
+            this._oauthServer = http.createServer((req, res) => {
+                const parsed = url.parse(req.url, true);
+                if (parsed.pathname !== '/callback') {
+                    res.end('Not found');
+                    return;
+                }
+
+                const { code, state, error } = parsed.query;
+
+                if (error) {
+                    res.end(`<html><body><h2>Login failed: ${error}</h2></body></html>`);
+                    clearTimeout(timeout);
+                    this._oauthServer.close();
+                    reject(new Error(`OAuth error: ${error}`));
+                    return;
+                }
+
+                if (state !== expectedState) {
+                    res.end(`<html><body><h2>Invalid state parameter</h2></body></html>`);
+                    clearTimeout(timeout);
+                    this._oauthServer.close();
+                    reject(new Error('OAuth state mismatch'));
+                    return;
+                }
+
+                res.end(`<html><body><h2>Login successful!</h2><p>You can close this window.</p></body></html>`);
+                clearTimeout(timeout);
+                this._oauthServer.close();
+                resolve(code);
+            });
+
+            this._oauthServer.listen(LOCAL_CALLBACK_PORT, () => {
+                this.log.info(`OAuth callback server listening on port ${LOCAL_CALLBACK_PORT}`);
+            });
+
+            this._oauthServer.on('error', (err) => {
+                clearTimeout(timeout);
+                reject(new Error(`OAuth server error: ${err.message}`));
+            });
+        });
+    }
+
+    async exchangeCodeForToken(code, verifier) {
+        this.log.info('Exchanging OAuth code for token...');
         try {
-            await this.blinkRequest('post',
-                `/api/v4/account/${this.authData.accountId}/client/${this.authData.clientId}/pin/verify`,
-                { pin: String(pin) }
-            );
-            this.pinPending = false;
-            this.log.info('2FA PIN verified successfully.');
-            this.setState('info.connection', true, true);
-            this.startPolling();
+            const resp = await axios.post(OAUTH_TOKEN_URL, new URLSearchParams({
+                grant_type:    'authorization_code',
+                client_id:     OAUTH_CLIENT_ID,
+                code:          code,
+                redirect_uri:  `http://localhost:${LOCAL_CALLBACK_PORT}/callback`,
+                code_verifier: verifier,
+            }).toString(), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'User-Agent':   'Blink/10.12.0 (iPhone; iOS 17.0)',
+                },
+                timeout: 15000,
+            });
+
+            const data = resp.data;
+            await this.processTokenResponse(data);
+
+        } catch (err) {
+            this.log.error(`Token exchange failed: ${err.message}`);
+            throw err;
+        }
+    }
+
+    async refreshAccessToken() {
+        if (!this.authData || !this.authData.refreshToken) return false;
+        this.log.info('Refreshing Blink access token...');
+        try {
+            const resp = await axios.post(OAUTH_TOKEN_URL, new URLSearchParams({
+                grant_type:    'refresh_token',
+                client_id:     OAUTH_CLIENT_ID,
+                refresh_token: this.authData.refreshToken,
+            }).toString(), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'User-Agent':   'Blink/10.12.0 (iPhone; iOS 17.0)',
+                },
+                timeout: 15000,
+            });
+
+            await this.processTokenResponse(resp.data);
+            this.log.info('Token refreshed successfully.');
             return true;
         } catch (err) {
-            this.log.error(`PIN verification failed: ${err.message}`);
+            this.log.warn(`Token refresh failed: ${err.message}`);
             return false;
         }
+    }
+
+    async processTokenResponse(data) {
+        // After token exchange, get account info
+        const tempToken = data.access_token;
+        let accountId = null;
+        let baseUrl = DEFAULT_BASE_URL;
+
+        try {
+            const accountResp = await axios.get(`${DEFAULT_BASE_URL}/api/v3/account/info`, {
+                headers: {
+                    'Authorization': `Bearer ${tempToken}`,
+                    'User-Agent':    'Blink/10.12.0 (iPhone; iOS 17.0)',
+                },
+                timeout: 15000,
+            });
+            accountId = accountResp.data.account && accountResp.data.account.id;
+            const tier = accountResp.data.account && accountResp.data.account.tier;
+            if (tier && BLINK_BASE_URLS[tier]) baseUrl = BLINK_BASE_URLS[tier];
+        } catch (e) {
+            this.log.debug(`Could not fetch account info: ${e.message}`);
+            // Try to get accountId from token payload (JWT)
+            try {
+                const payload = JSON.parse(Buffer.from(tempToken.split('.')[1], 'base64').toString());
+                accountId = payload.account_id || payload.sub;
+            } catch (_) { /* ignore */ }
+        }
+
+        this.authData = {
+            accessToken:  tempToken,
+            refreshToken: data.refresh_token || null,
+            accountId:    accountId,
+            baseUrl:      baseUrl,
+        };
+
+        await this.saveAuthData();
+        this.setState('info.connection', true, true);
+        this.log.info('Blink OAuth login successful.');
+        this.startPolling();
     }
 
     async verifyToken() {
@@ -159,66 +282,55 @@ class BlinkAdapter extends utils.Adapter {
             await this.blinkRequest('get', `/api/v3/accounts/${this.authData.accountId}/homescreen`);
             return true;
         } catch (err) {
-            this.log.debug('Saved token invalid, re-login required.');
+            this.log.debug('Token invalid or expired.');
             return false;
         }
     }
 
     async saveAuthData() {
-        await this.setObjectNotExistsAsync('auth', { type: 'channel', common: { name: 'Auth (internal)' }, native: {} });
-        await this.setObjectNotExistsAsync('auth.token', { type: 'state', common: { name: 'Auth token', type: 'string', role: 'text', read: true, write: false }, native: {} });
-        await this.setObjectNotExistsAsync('auth.accountId', { type: 'state', common: { name: 'Account ID', type: 'number', role: 'value', read: true, write: false }, native: {} });
-        await this.setObjectNotExistsAsync('auth.clientId', { type: 'state', common: { name: 'Client ID', type: 'number', role: 'value', read: true, write: false }, native: {} });
-        await this.setObjectNotExistsAsync('auth.baseUrl', { type: 'state', common: { name: 'Base URL', type: 'string', role: 'text', read: true, write: false }, native: {} });
-
-        await this.setStateAsync('auth.token', { val: this.authData.token, ack: true });
-        await this.setStateAsync('auth.accountId', { val: this.authData.accountId, ack: true });
-        await this.setStateAsync('auth.clientId', { val: this.authData.clientId, ack: true });
-        await this.setStateAsync('auth.baseUrl', { val: this.authData.baseUrl, ack: true });
+        await this.setObjectNotExistsAsync('auth', {
+            type: 'channel', common: { name: 'Auth (internal)' }, native: {},
+        });
+        const states = [
+            { id: 'auth.accessToken',  name: 'Access Token',   val: this.authData.accessToken  },
+            { id: 'auth.refreshToken', name: 'Refresh Token',  val: this.authData.refreshToken || '' },
+            { id: 'auth.accountId',    name: 'Account ID',     val: this.authData.accountId    },
+            { id: 'auth.baseUrl',      name: 'Base URL',       val: this.authData.baseUrl       },
+        ];
+        for (const s of states) {
+            await this.setObjectNotExistsAsync(s.id, {
+                type: 'state',
+                common: { name: s.name, type: 'string', role: 'text', read: true, write: false },
+                native: {},
+            });
+            await this.setStateAsync(s.id, { val: s.val, ack: true });
+        }
     }
 
     // ─── Polling ──────────────────────────────────────────────────────────────
 
     startPolling() {
         const pollInterval = (this.config.pollingInterval || 30) * 1000;
-
-        // Initial fetch (metadata only — no images yet)
         this.fetchAllData();
-
-        // Regular metadata poll (status, battery, motion events, armed state)
         this.pollingTimer = setInterval(() => this.fetchAllData(), pollInterval);
-
-        // Weekly snapshot: every Saturday at 12:00
         this.scheduleWeeklySnapshot();
-
-        this.log.info('Polling started. Snapshots trigger on: motion+armed, manual button, or Saturday 12:00.');
+        this.log.info('Polling started.');
     }
 
     scheduleWeeklySnapshot() {
-        const msUntilNextSaturday = this.msUntilNextSaturday12();
-        const days = Math.round(msUntilNextSaturday / 1000 / 60 / 60 / 24 * 10) / 10;
-        this.log.info(`Next weekly snapshot scheduled in ${days} day(s) (Saturday 12:00).`);
-
+        const ms = this.msUntilNextSaturday12();
         this.weeklyTimer = setTimeout(async () => {
-            this.log.info('Weekly Saturday 12:00 snapshot: fetching all camera images...');
+            this.log.info('Weekly Saturday snapshot...');
             await this.fetchAllSnapshots('weekly');
-            // Re-schedule for next week
             this.scheduleWeeklySnapshot();
-        }, msUntilNextSaturday);
+        }, ms);
     }
 
     msUntilNextSaturday12() {
         const now = new Date();
         const target = new Date(now);
-        // Saturday = 6
-        const dayOfWeek = now.getDay();  // 0=Sun … 6=Sat
-        let daysUntilSat = (6 - dayOfWeek + 7) % 7;
-
-        // If today IS Saturday: check if 12:00 is still in the future
-        if (daysUntilSat === 0 && now.getHours() >= 12) {
-            daysUntilSat = 7;  // already past 12:00 today → next Saturday
-        }
-
+        let daysUntilSat = (6 - now.getDay() + 7) % 7;
+        if (daysUntilSat === 0 && now.getHours() >= 12) daysUntilSat = 7;
         target.setDate(now.getDate() + daysUntilSat);
         target.setHours(12, 0, 0, 0);
         return target.getTime() - now.getTime();
@@ -233,23 +345,20 @@ class BlinkAdapter extends utils.Adapter {
         } catch (err) {
             this.log.warn(`Error fetching Blink data: ${err.message}`);
             if (err.response && (err.response.status === 401 || err.response.status === 403)) {
-                this.log.info('Token expired, re-logging in...');
-                this.authData = null;
-                this.setState('info.connection', false, true);
-                if (this.pollingTimer) clearInterval(this.pollingTimer);
-                if (this.snapshotTimer) clearInterval(this.snapshotTimer);
-                await this.login();
+                this.log.info('Token expired, attempting refresh...');
+                const refreshed = await this.refreshAccessToken();
+                if (!refreshed) {
+                    this.authData = null;
+                    this.setState('info.connection', false, true);
+                    if (this.pollingTimer) clearInterval(this.pollingTimer);
+                    await this.loginOAuth();
+                }
             }
         }
     }
 
-    // reason: 'motion' | 'weekly' | 'manual'
     async fetchAllSnapshots(reason = 'manual') {
-        if (!this.authData) return;
-        if (this.snapshotRunning) {
-            this.log.debug('Snapshot cycle already running, skipping.');
-            return;
-        }
+        if (!this.authData || this.snapshotRunning) return;
         this.snapshotRunning = true;
         try {
             const data = await this.blinkRequest('get', `/api/v3/accounts/${this.authData.accountId}/homescreen`);
@@ -258,19 +367,13 @@ class BlinkAdapter extends utils.Adapter {
                 ...(data.owls      || []),
                 ...(data.doorbells || []),
             ];
-
-            this.log.info(`Fetching snapshots for all ${cameras.length} cameras (reason: ${reason}, staggered 3s apart)...`);
-
             for (const cam of cameras) {
                 await this.triggerCameraSnapshot(cam.network_id, cam.id, cam.name);
                 await this.sleep(3000);
             }
-
-            // Single refresh to pick up new thumbnail URLs
             await this.fetchAllData();
-
         } catch (err) {
-            this.log.warn(`Error during snapshot cycle (${reason}): ${err.message}`);
+            this.log.warn(`Snapshot cycle error (${reason}): ${err.message}`);
         } finally {
             this.snapshotRunning = false;
         }
@@ -279,93 +382,61 @@ class BlinkAdapter extends utils.Adapter {
     // ─── Data Processing ──────────────────────────────────────────────────────
 
     async processHomescreenData(data) {
-        // Networks/Systems
         if (data.networks) {
-            for (const network of data.networks) {
-                await this.createNetworkObjects(network);
-                await this.updateNetworkStates(network);
+            for (const net of data.networks) {
+                await this.createNetworkObjects(net);
+                await this.updateNetworkStates(net);
             }
         }
-
-        // Cameras from homescreen
         if (data.cameras) {
             for (const cam of data.cameras) {
                 await this.createCameraObjects(cam.network_id, cam);
                 await this.updateCameraStates(cam.network_id, cam);
             }
         }
-
-        // Owls (Blink Mini cameras)
         if (data.owls) {
             for (const owl of data.owls) {
                 await this.createCameraObjects(owl.network_id, owl, true);
                 await this.updateCameraStates(owl.network_id, owl, true);
             }
         }
-
-        // Doorbells
         if (data.doorbells) {
             for (const db of data.doorbells) {
                 await this.createCameraObjects(db.network_id, db, false, true);
                 await this.updateCameraStates(db.network_id, db, false, true);
             }
         }
-
-        // Video events (last clips) — also triggers motion snapshot if armed
         if (data.videos) {
-            for (const vid of data.videos) {
-                await this.processVideoEvent(vid);
-            }
-            // Check for new motion events on armed networks
+            for (const vid of data.videos) await this.processVideoEvent(vid);
             await this.checkMotionAndSnapshot(data);
         }
     }
 
     async checkMotionAndSnapshot(data) {
         if (!data.videos || data.videos.length === 0) return;
-
-        // Build a set of armed network IDs
         const armedNetworks = new Set(
-            (data.networks || [])
-                .filter(n => n.armed)
-                .map(n => String(n.id))
+            (data.networks || []).filter(n => n.armed).map(n => String(n.id))
         );
-
-        // Find cameras that have a NEW video event since last check
-        const camerasNeedingSnapshot = [];
-
+        const needSnapshot = [];
         for (const vid of data.videos) {
             const netId = String(vid.network_id);
             const camId = String(vid.device_id || vid.camera_id);
-            if (!netId || !camId) continue;
-
-            // Only react if the network is armed
-            if (!armedNetworks.has(netId)) continue;
-
-            const cacheKey = `${netId}.${camId}`;
-            const lastKnown = this.lastVideoCache[cacheKey];
-            const vidTime = vid.created_at;
-
-            if (vidTime && vidTime !== lastKnown) {
-                this.lastVideoCache[cacheKey] = vidTime;
-                // Avoid duplicates if multiple events for same camera
-                if (!camerasNeedingSnapshot.find(c => c.netId === netId && c.camId === camId)) {
-                    camerasNeedingSnapshot.push({ netId, camId, name: vid.camera_name });
-                    this.log.info(`Motion detected on armed camera "${vid.camera_name}" (net ${netId}) — triggering snapshot.`);
+            if (!netId || !camId || !armedNetworks.has(netId)) continue;
+            const key = `${netId}.${camId}`;
+            if (vid.created_at && vid.created_at !== this.lastVideoCache[key]) {
+                this.lastVideoCache[key] = vid.created_at;
+                if (!needSnapshot.find(c => c.netId === netId && c.camId === camId)) {
+                    needSnapshot.push({ netId, camId, name: vid.camera_name });
                 }
             }
         }
-
-        if (camerasNeedingSnapshot.length === 0) return;
-        if (this.snapshotRunning) return;
-
+        if (needSnapshot.length === 0 || this.snapshotRunning) return;
         this.snapshotRunning = true;
         try {
-            for (const cam of camerasNeedingSnapshot) {
+            for (const cam of needSnapshot) {
                 await this.triggerCameraSnapshot(cam.netId, cam.camId, cam.name);
-                if (camerasNeedingSnapshot.length > 1) await this.sleep(3000);
+                if (needSnapshot.length > 1) await this.sleep(3000);
             }
-            // Fetch fresh data to get new thumbnail URLs
             await this.sleep(4000);
             await this.fetchAllData();
         } finally {
@@ -373,36 +444,25 @@ class BlinkAdapter extends utils.Adapter {
         }
     }
 
-    // ─── ioBroker Object Creation ─────────────────────────────────────────────
+    // ─── ioBroker Objects ─────────────────────────────────────────────────────
 
     async createNetworkObjects(network) {
         const netId = `networks.${network.id}`;
         await this.setObjectNotExistsAsync(netId, {
-            type: 'channel',
-            common: { name: network.name || `Network ${network.id}` },
-            native: { networkId: network.id },
+            type: 'channel', common: { name: network.name || `Network ${network.id}` }, native: {},
         });
-
         const states = [
-            { id: 'name', name: 'Network Name', type: 'string', role: 'text', write: false },
-            { id: 'armed', name: 'Armed', type: 'boolean', role: 'switch.lock', write: true },
-            { id: 'enabled', name: 'Enabled', type: 'boolean', role: 'indicator', write: false },
-            { id: 'networkId', name: 'Network ID', type: 'number', role: 'value', write: false },
-            { id: 'arm', name: 'Arm network', type: 'boolean', role: 'button', write: true, def: false },
-            { id: 'disarm', name: 'Disarm network', type: 'boolean', role: 'button', write: true, def: false },
+            { id: 'name',      name: 'Network Name', type: 'string',  role: 'text',        write: false },
+            { id: 'armed',     name: 'Armed',        type: 'boolean', role: 'switch.lock', write: true  },
+            { id: 'enabled',   name: 'Enabled',      type: 'boolean', role: 'indicator',   write: false },
+            { id: 'networkId', name: 'Network ID',   type: 'number',  role: 'value',       write: false },
+            { id: 'arm',       name: 'Arm network',  type: 'boolean', role: 'button',      write: true, def: false },
+            { id: 'disarm',    name: 'Disarm',       type: 'boolean', role: 'button',      write: true, def: false },
         ];
-
         for (const s of states) {
             await this.setObjectNotExistsAsync(`${netId}.${s.id}`, {
                 type: 'state',
-                common: {
-                    name: s.name,
-                    type: s.type,
-                    role: s.role,
-                    read: true,
-                    write: s.write,
-                    ...(s.def !== undefined ? { def: s.def } : {}),
-                },
+                common: { name: s.name, type: s.type, role: s.role, read: true, write: s.write, ...(s.def !== undefined ? { def: s.def } : {}) },
                 native: {},
             });
         }
@@ -410,57 +470,34 @@ class BlinkAdapter extends utils.Adapter {
 
     async createCameraObjects(networkId, cam, isMini = false, isDoorbell = false) {
         const camId = `networks.${networkId}.cameras.${cam.id}`;
-        const typeLabel = isDoorbell ? 'Doorbell' : (isMini ? 'Blink Mini' : 'Camera');
-
         await this.setObjectNotExistsAsync(`networks.${networkId}.cameras`, {
-            type: 'channel',
-            common: { name: 'Cameras' },
-            native: {},
+            type: 'channel', common: { name: 'Cameras' }, native: {},
         });
-
         await this.setObjectNotExistsAsync(camId, {
             type: 'channel',
-            common: { name: `${typeLabel}: ${cam.name || cam.id}` },
+            common: { name: `${isDoorbell ? 'Doorbell' : isMini ? 'Blink Mini' : 'Camera'}: ${cam.name || cam.id}` },
             native: { cameraId: cam.id, networkId },
         });
-
         const states = [
-            { id: 'name', name: 'Camera Name', type: 'string', role: 'text', write: false },
-            { id: 'enabled', name: 'Enabled', type: 'boolean', role: 'indicator', write: false },
-            { id: 'battery', name: 'Battery (%)', type: 'number', role: 'value.battery', unit: '%', write: false },
-            { id: 'batteryVoltage', name: 'Battery Voltage (mV)', type: 'number', role: 'value.voltage', unit: 'mV', write: false },
-            { id: 'temperature', name: 'Temperature (°F)', type: 'number', role: 'value.temperature', unit: '°F', write: false },
-            { id: 'temperatureC', name: 'Temperature (°C)', type: 'number', role: 'value.temperature', unit: '°C', write: false },
-            { id: 'serial', name: 'Serial Number', type: 'string', role: 'text', write: false },
-            { id: 'firmware', name: 'Firmware Version', type: 'string', role: 'text', write: false },
-            { id: 'type', name: 'Camera Type', type: 'string', role: 'text', write: false },
-            { id: 'networkId', name: 'Network ID', type: 'number', role: 'value', write: false },
-            { id: 'cameraId', name: 'Camera ID', type: 'number', role: 'value', write: false },
-            { id: 'status', name: 'Status', type: 'string', role: 'text', write: false },
-            { id: 'online', name: 'Online', type: 'boolean', role: 'indicator.connected', write: false },
-            { id: 'motionAlert', name: 'Motion Alert active', type: 'boolean', role: 'indicator.motion', write: false },
-            { id: 'lastMotion', name: 'Last Motion detected', type: 'string', role: 'value.datetime', write: false },
-            { id: 'thumbnail', name: 'Thumbnail URL', type: 'string', role: 'url', write: false },
-            { id: 'thumbnailData', name: 'Thumbnail (Base64 JPEG)', type: 'string', role: 'url', write: false },
-            { id: 'snapshot', name: 'Trigger new snapshot', type: 'boolean', role: 'button', write: true, def: false },
-            { id: 'enableCamera', name: 'Enable camera', type: 'boolean', role: 'button', write: true, def: false },
-            { id: 'disableCamera', name: 'Disable camera', type: 'boolean', role: 'button', write: true, def: false },
-            { id: 'lastUpdated', name: 'Last Updated', type: 'string', role: 'value.datetime', write: false },
-            { id: 'wifiStrength', name: 'WiFi Strength (dBm)', type: 'number', role: 'value', unit: 'dBm', write: false },
+            { id: 'name',          name: 'Camera Name',          type: 'string',  role: 'text',                write: false },
+            { id: 'enabled',       name: 'Enabled',              type: 'boolean', role: 'indicator',           write: false },
+            { id: 'battery',       name: 'Battery (%)',           type: 'number',  role: 'value.battery',       write: false, unit: '%'   },
+            { id: 'temperature',   name: 'Temperature (°F)',      type: 'number',  role: 'value.temperature',   write: false, unit: '°F'  },
+            { id: 'temperatureC',  name: 'Temperature (°C)',      type: 'number',  role: 'value.temperature',   write: false, unit: '°C'  },
+            { id: 'serial',        name: 'Serial Number',         type: 'string',  role: 'text',                write: false },
+            { id: 'firmware',      name: 'Firmware',              type: 'string',  role: 'text',                write: false },
+            { id: 'online',        name: 'Online',                type: 'boolean', role: 'indicator.connected', write: false },
+            { id: 'motionAlert',   name: 'Motion Alert',          type: 'boolean', role: 'indicator.motion',    write: false },
+            { id: 'thumbnail',     name: 'Thumbnail URL',         type: 'string',  role: 'url',                 write: false },
+            { id: 'thumbnailData', name: 'Thumbnail (Base64)',    type: 'string',  role: 'url',                 write: false },
+            { id: 'snapshot',      name: 'Trigger snapshot',      type: 'boolean', role: 'button',              write: true, def: false },
+            { id: 'lastUpdated',   name: 'Last Updated',          type: 'string',  role: 'value.datetime',      write: false },
+            { id: 'wifiStrength',  name: 'WiFi Strength (dBm)',   type: 'number',  role: 'value',               write: false, unit: 'dBm' },
         ];
-
         for (const s of states) {
             await this.setObjectNotExistsAsync(`${camId}.${s.id}`, {
                 type: 'state',
-                common: {
-                    name: s.name,
-                    type: s.type,
-                    role: s.role,
-                    read: true,
-                    write: s.write,
-                    ...(s.unit ? { unit: s.unit } : {}),
-                    ...(s.def !== undefined ? { def: s.def } : {}),
-                },
+                common: { name: s.name, type: s.type, role: s.role, read: true, write: s.write, ...(s.unit ? { unit: s.unit } : {}), ...(s.def !== undefined ? { def: s.def } : {}) },
                 native: {},
             });
         }
@@ -469,264 +506,167 @@ class BlinkAdapter extends utils.Adapter {
     // ─── State Updates ────────────────────────────────────────────────────────
 
     async updateNetworkStates(network) {
-        const netId = `networks.${network.id}`;
-        await this.setStateAsync(`${netId}.name`, { val: network.name || '', ack: true });
-        await this.setStateAsync(`${netId}.armed`, { val: !!network.armed, ack: true });
-        await this.setStateAsync(`${netId}.enabled`, { val: !!network.enabled, ack: true });
-        await this.setStateAsync(`${netId}.networkId`, { val: network.id, ack: true });
+        const id = `networks.${network.id}`;
+        await this.setStateAsync(`${id}.name`,      { val: network.name || '',   ack: true });
+        await this.setStateAsync(`${id}.armed`,     { val: !!network.armed,      ack: true });
+        await this.setStateAsync(`${id}.enabled`,   { val: !!network.enabled,    ack: true });
+        await this.setStateAsync(`${id}.networkId`, { val: network.id,           ack: true });
     }
 
     async updateCameraStates(networkId, cam) {
-        const camId = `networks.${networkId}.cameras.${cam.id}`;
-        const toC = (f) => f != null ? Math.round((f - 32) * 5 / 9 * 10) / 10 : null;
+        const id = `networks.${networkId}.cameras.${cam.id}`;
+        const toC = f => f != null ? Math.round((f - 32) * 5 / 9 * 10) / 10 : null;
 
-        await this.setStateAsync(`${camId}.name`, { val: cam.name || '', ack: true });
-        await this.setStateAsync(`${camId}.enabled`, { val: cam.enabled != null ? !!cam.enabled : true, ack: true });
-        await this.setStateAsync(`${camId}.networkId`, { val: networkId, ack: true });
-        await this.setStateAsync(`${camId}.cameraId`, { val: cam.id, ack: true });
-        await this.setStateAsync(`${camId}.serial`, { val: cam.serial || '', ack: true });
-        await this.setStateAsync(`${camId}.firmware`, { val: cam.fw_version || cam.firmware || '', ack: true });
-        await this.setStateAsync(`${camId}.type`, { val: cam.type || cam.camera_type || 'unknown', ack: true });
-        await this.setStateAsync(`${camId}.status`, { val: cam.status || '', ack: true });
-        await this.setStateAsync(`${camId}.online`, { val: cam.status === 'online' || cam.active === 'armed', ack: true });
-        await this.setStateAsync(`${camId}.motionAlert`, { val: !!cam.motion_alert, ack: true });
-        await this.setStateAsync(`${camId}.lastUpdated`, { val: new Date().toISOString(), ack: true });
+        await this.setStateAsync(`${id}.name`,        { val: cam.name || '', ack: true });
+        await this.setStateAsync(`${id}.enabled`,     { val: cam.enabled != null ? !!cam.enabled : true, ack: true });
+        await this.setStateAsync(`${id}.serial`,      { val: cam.serial || '', ack: true });
+        await this.setStateAsync(`${id}.firmware`,    { val: cam.fw_version || cam.firmware || '', ack: true });
+        await this.setStateAsync(`${id}.online`,      { val: cam.status === 'online', ack: true });
+        await this.setStateAsync(`${id}.motionAlert`, { val: !!cam.motion_alert, ack: true });
+        await this.setStateAsync(`${id}.lastUpdated`, { val: new Date().toISOString(), ack: true });
 
         if (cam.battery != null) {
-            const batPct = typeof cam.battery === 'string'
+            const pct = typeof cam.battery === 'string'
                 ? (cam.battery === 'ok' ? 100 : cam.battery === 'low' ? 20 : null)
                 : cam.battery;
-            await this.setStateAsync(`${camId}.battery`, { val: batPct, ack: true });
-        }
-        if (cam.battery_voltage != null) {
-            await this.setStateAsync(`${camId}.batteryVoltage`, { val: cam.battery_voltage, ack: true });
+            await this.setStateAsync(`${id}.battery`, { val: pct, ack: true });
         }
         if (cam.temperature != null) {
-            await this.setStateAsync(`${camId}.temperature`, { val: cam.temperature, ack: true });
-            await this.setStateAsync(`${camId}.temperatureC`, { val: toC(cam.temperature), ack: true });
+            await this.setStateAsync(`${id}.temperature`,  { val: cam.temperature, ack: true });
+            await this.setStateAsync(`${id}.temperatureC`, { val: toC(cam.temperature), ack: true });
         }
         if (cam.signals && cam.signals.wifi != null) {
-            await this.setStateAsync(`${camId}.wifiStrength`, { val: cam.signals.wifi, ack: true });
+            await this.setStateAsync(`${id}.wifiStrength`, { val: cam.signals.wifi, ack: true });
         }
-
-        // Thumbnail URL (can come as partial path)
         if (cam.thumbnail) {
             const thumbUrl = cam.thumbnail.startsWith('http')
                 ? cam.thumbnail
                 : `${this.authData.baseUrl}${cam.thumbnail}`;
-            await this.setStateAsync(`${camId}.thumbnail`, { val: thumbUrl, ack: true });
-
-            // Only re-download the image if the URL changed (avoids 30× download per poll)
+            await this.setStateAsync(`${id}.thumbnail`, { val: thumbUrl, ack: true });
             const cacheKey = `${networkId}.${cam.id}`;
             if (this.thumbnailUrlCache[cacheKey] !== thumbUrl) {
                 try {
                     const imgData = await this.downloadImageAsBase64(thumbUrl);
                     if (imgData) {
-                        await this.setStateAsync(`${camId}.thumbnailData`, { val: imgData, ack: true });
+                        await this.setStateAsync(`${id}.thumbnailData`, { val: imgData, ack: true });
                         this.thumbnailUrlCache[cacheKey] = thumbUrl;
                     }
-                } catch (e) {
-                    this.log.debug(`Could not fetch thumbnail image: ${e.message}`);
-                }
+                } catch (e) { this.log.debug(`Thumbnail download failed: ${e.message}`); }
             }
         }
     }
 
     async processVideoEvent(vid) {
-        // Videos are stored under the camera they belong to
-        if (!vid.camera_name && !vid.device_id) return;
         const netId = vid.network_id;
         const camId = vid.device_id || vid.camera_id;
         if (!netId || !camId) return;
-
         const prefix = `networks.${netId}.cameras.${camId}`;
         await this.setObjectNotExistsAsync(`${prefix}.lastVideo`, {
-            type: 'state',
-            common: { name: 'Last Video URL', type: 'string', role: 'url', read: true, write: false },
-            native: {},
+            type: 'state', common: { name: 'Last Video URL', type: 'string', role: 'url', read: true, write: false }, native: {},
         });
         await this.setObjectNotExistsAsync(`${prefix}.lastVideoTime`, {
-            type: 'state',
-            common: { name: 'Last Video Time', type: 'string', role: 'value.datetime', read: true, write: false },
-            native: {},
+            type: 'state', common: { name: 'Last Video Time', type: 'string', role: 'value.datetime', read: true, write: false }, native: {},
         });
-
         const videoUrl = vid.address
             ? (vid.address.startsWith('http') ? vid.address : `${this.authData.baseUrl}${vid.address}`)
             : '';
-        await this.setStateAsync(`${prefix}.lastVideo`, { val: videoUrl, ack: true });
+        await this.setStateAsync(`${prefix}.lastVideo`,     { val: videoUrl,          ack: true });
         await this.setStateAsync(`${prefix}.lastVideoTime`, { val: vid.created_at || '', ack: true });
     }
 
     // ─── Camera Actions ───────────────────────────────────────────────────────
 
-    async triggerCameraSnapshot(networkId, cameraId, cameraName) {
-        this.log.debug(`Triggering snapshot for camera ${cameraName || cameraId}...`);
+    async triggerCameraSnapshot(networkId, cameraId, name) {
         try {
-            await this.blinkRequest(
-                'post',
+            await this.blinkRequest('post',
                 `/api/v5/accounts/${this.authData.accountId}/networks/${networkId}/cameras/${cameraId}/thumbnail`
             );
-            // NOTE: No fetchAllData() here — caller is responsible for the final refresh.
-            // This prevents N×fetchAllData when cycling through 30 cameras.
-            this.log.debug(`Snapshot requested for camera ${cameraName || cameraId}`);
         } catch (err) {
-            this.log.warn(`Failed to trigger snapshot for camera ${cameraName || cameraId}: ${err.message}`);
+            this.log.warn(`Snapshot failed for ${name || cameraId}: ${err.message}`);
         }
     }
 
     async armNetwork(networkId) {
         await this.blinkRequest('post', `/api/v1/networks/${networkId}/arm`);
-        this.log.info(`Network ${networkId} armed.`);
     }
 
     async disarmNetwork(networkId) {
         await this.blinkRequest('post', `/api/v1/networks/${networkId}/disarm`);
-        this.log.info(`Network ${networkId} disarmed.`);
-    }
-
-    async enableCamera(networkId, cameraId) {
-        await this.blinkRequest('post', `/api/v1/networks/${networkId}/cameras/${cameraId}/enable`);
-        this.log.info(`Camera ${cameraId} enabled.`);
-    }
-
-    async disableCamera(networkId, cameraId) {
-        await this.blinkRequest('post', `/api/v1/networks/${networkId}/cameras/${cameraId}/disable`);
-        this.log.info(`Camera ${cameraId} disabled.`);
-    }
-
-    async fetchNetworkCameras(networkId) {
-        try {
-            const data = await this.blinkRequest('get', `/api/v3/accounts/${this.authData.accountId}/networks/${networkId}/cameras`);
-            if (data && data.cameras) {
-                for (const cam of data.cameras) {
-                    await this.createCameraObjects(networkId, cam);
-                    await this.updateCameraStates(networkId, cam);
-                }
-            }
-        } catch (err) {
-            this.log.debug(`Could not fetch cameras for network ${networkId}: ${err.message}`);
-        }
     }
 
     // ─── State Change Handler ─────────────────────────────────────────────────
 
     async onStateChange(id, state) {
         if (!state || state.ack) return;
-
-        // Parse id: blink.0.networks.{netId}.cameras.{camId}.{action}
-        //       or: blink.0.networks.{netId}.{action}
         const parts = id.replace(`${this.namespace}.`, '').split('.');
-
         if (parts[0] !== 'networks') return;
         const networkId = parseInt(parts[1]);
 
         if (parts[2] === 'cameras') {
             const cameraId = parseInt(parts[3]);
-            const action = parts[4];
-
+            const action   = parts[4];
             if (action === 'snapshot' && state.val) {
                 await this.triggerCameraSnapshot(networkId, cameraId);
-                await this.sleep(4000);  // give Blink time to process
-                await this.fetchAllData();
-            } else if (action === 'enableCamera' && state.val) {
-                await this.enableCamera(networkId, cameraId);
-                await this.fetchAllData();
-            } else if (action === 'disableCamera' && state.val) {
-                await this.disableCamera(networkId, cameraId);
+                await this.sleep(4000);
                 await this.fetchAllData();
             }
         } else {
             const action = parts[2];
-            if (action === 'arm' && state.val) {
+            if ((action === 'arm' && state.val) || (action === 'armed' && state.val)) {
                 await this.armNetwork(networkId);
                 await this.fetchAllData();
-            } else if (action === 'disarm' && state.val) {
+            } else if ((action === 'disarm' && state.val) || (action === 'armed' && !state.val)) {
                 await this.disarmNetwork(networkId);
-                await this.fetchAllData();
-            } else if (action === 'armed') {
-                if (state.val) {
-                    await this.armNetwork(networkId);
-                } else {
-                    await this.disarmNetwork(networkId);
-                }
                 await this.fetchAllData();
             }
         }
     }
 
-    // ─── Message Handler (for PIN entry via sendTo) ───────────────────────────
+    // ─── Message Handler ──────────────────────────────────────────────────────
 
     async onMessage(obj) {
         if (!obj || !obj.command) return;
-
-        if (obj.command === 'verifyPin') {
-            const pin = obj.message && obj.message.pin;
-            if (!pin) {
-                this.sendTo(obj.from, obj.command, { error: 'No PIN provided' }, obj.callback);
-                return;
-            }
-            const ok = await this.verifyPin(pin);
-            this.sendTo(obj.from, obj.command, { success: ok }, obj.callback);
-
-        } else if (obj.command === 'getStatus') {
-            this.sendTo(obj.from, obj.command, {
-                connected: this.authData !== null,
-                pinPending: this.pinPending,
-            }, obj.callback);
-
-        } else if (obj.command === 'refreshAllSnapshots') {
+        if (obj.command === 'getLoginUrl') {
+            const s = await this.getStateAsync('auth.loginUrl');
+            this.sendTo(obj.from, obj.command, { url: s ? s.val : null }, obj.callback);
+        } else if (obj.command === 'refreshSnapshots') {
             this.fetchAllSnapshots('manual').catch(e => this.log.warn(e.message));
             this.sendTo(obj.from, obj.command, { queued: true }, obj.callback);
+        } else if (obj.command === 'getStatus') {
+            this.sendTo(obj.from, obj.command, { connected: this.authData !== null }, obj.callback);
         }
     }
 
     // ─── HTTP Helper ──────────────────────────────────────────────────────────
 
-async blinkRequest(method, endpoint, body = null) {
-    if (!this.authData) throw new Error('Not authenticated');
-
-    const url = `${this.authData.baseUrl}${endpoint}`;
-    const headers = {
-        'TOKEN_AUTH': this.authData.token,
-        'Content-Type': 'application/json',
-        'app-build': '9.53.0 (1)',
-        'User-Agent': 'Mozilla/5.0',
-        'Accept': 'application/json',
-        'locale': 'de_DE',
-        'x-blink-time-zone': 'Europe/Berlin',
-    };
-
-    const config = { headers, timeout: 15000 };
-    let resp;
-
-    if (method === 'get') {
-        resp = await axios.get(url, config);
-    } else if (method === 'post') {
-        resp = await axios.post(url, body || {}, config);
-    } else if (method === 'delete') {
-        resp = await axios.delete(url, config);
+    async blinkRequest(method, endpoint, body = null) {
+        if (!this.authData) throw new Error('Not authenticated');
+        const url = `${this.authData.baseUrl}${endpoint}`;
+        const headers = {
+            'Authorization': `Bearer ${this.authData.accessToken}`,
+            'Content-Type':  'application/json',
+            'User-Agent':    'Blink/10.12.0 (iPhone; iOS 17.0)',
+        };
+        const config = { headers, timeout: 15000 };
+        let resp;
+        if (method === 'get')    resp = await axios.get(url, config);
+        else if (method === 'post') resp = await axios.post(url, body || {}, config);
+        else if (method === 'delete') resp = await axios.delete(url, config);
+        return resp.data;
     }
-
-    return resp.data;
-}
 
     async downloadImageAsBase64(url) {
         try {
-            // Add .jpg extension if missing
-            const fetchUrl = url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png')
-                ? url
-                : url + '.jpg';
-
+            const fetchUrl = (url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png')) ? url : url + '.jpg';
             const resp = await axios.get(fetchUrl, {
                 responseType: 'arraybuffer',
                 headers: {
-                    'TOKEN_AUTH': this.authData.token,
-                    'User-Agent': 'Mozilla/5.0',
+                    'Authorization': `Bearer ${this.authData.accessToken}`,
+                    'User-Agent':    'Blink/10.12.0 (iPhone; iOS 17.0)',
                 },
                 timeout: 15000,
             });
-            const base64 = Buffer.from(resp.data, 'binary').toString('base64');
+            const base64   = Buffer.from(resp.data, 'binary').toString('base64');
             const mimeType = resp.headers['content-type'] || 'image/jpeg';
             return `data:${mimeType};base64,${base64}`;
         } catch (err) {
@@ -735,18 +675,8 @@ async blinkRequest(method, endpoint, body = null) {
         }
     }
 
-    // ─── Utilities ────────────────────────────────────────────────────────────
-
-    getUniqueId() {
-        return `iobroker-${this.namespace}-${Date.now()}`;
-    }
-
-    sleep(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-    }
+    sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 }
-
-// ─── Adapter Start ────────────────────────────────────────────────────────────
 
 if (require.main !== module) {
     module.exports = (options) => new BlinkAdapter(options);
