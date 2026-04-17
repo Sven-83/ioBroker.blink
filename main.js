@@ -1,8 +1,10 @@
 'use strict';
 
-const utils  = require('@iobroker/adapter-core');
-const axios  = require('axios');
-const crypto = require('crypto');
+const utils   = require('@iobroker/adapter-core');
+const axios   = require('axios');
+const crypto  = require('crypto');
+const { wrapper }     = require('axios-cookiejar-support');
+const { CookieJar }   = require('tough-cookie');
 
 const OAUTH_BASE_URL      = 'https://api.oauth.blink.com';
 const OAUTH_AUTHORIZE_URL = `${OAUTH_BASE_URL}/oauth/v2/authorize`;
@@ -34,6 +36,12 @@ function generateHardwareId() {
     return crypto.randomUUID().toUpperCase();
 }
 
+function createOAuthSession() {
+    const jar = new CookieJar();
+    const session = wrapper(axios.create({ timeout: 15000, jar, withCredentials: true }));
+    return session;
+}
+
 class BlinkAdapter extends utils.Adapter {
     constructor(options) {
         super({ ...options, name: 'blink' });
@@ -43,8 +51,7 @@ class BlinkAdapter extends utils.Adapter {
         this.snapshotRunning   = false;
         this.thumbnailUrlCache = {};
         this.lastVideoCache    = {};
-        this._signinCookies    = '';
-        this.axiosSession      = axios.create({ timeout: 15000 });
+        this.apiSession        = axios.create({ timeout: 15000 });
         this.on('ready',       this.onReady.bind(this));
         this.on('stateChange', this.onStateChange.bind(this));
         this.on('message',     this.onMessage.bind(this));
@@ -99,112 +106,108 @@ class BlinkAdapter extends utils.Adapter {
 
     async loginOAuth() {
         this.log.info('Starte Blink OAuth2 Login...');
+        // Neuen Cookie-Jar fuer jeden Login-Versuch
+        const oauthSession = createOAuthSession();
         const hardwareId = (this.authData && this.authData.hardwareId) || generateHardwareId();
         const { verifier, challenge } = generatePKCE();
+
         try {
-            await this.oauthAuthorizeRequest(hardwareId, challenge);
-            const csrfToken = await this.oauthGetCsrfToken();
+            // Schritt 1: Authorize Request (setzt Session-Cookies)
+            await this.oauthAuthorizeRequest(oauthSession, hardwareId, challenge);
+            this.log.debug('Authorize Request abgeschlossen.');
+
+            // Schritt 2: Signin-Seite laden und CSRF Token holen
+            const csrfToken = await this.oauthGetCsrfToken(oauthSession);
             if (!csrfToken) throw new Error('CSRF Token nicht gefunden');
             this.log.debug('CSRF Token erhalten.');
 
-            const loginResult = await this.oauthSignin(csrfToken);
+            // Schritt 3: Login mit Email/Passwort
+            const loginResult = await this.oauthSignin(oauthSession, csrfToken);
             this.log.debug(`Login Ergebnis: ${loginResult}`);
 
             if (loginResult === '2FA_REQUIRED') {
+                this._pendingSession  = oauthSession;
                 this._pendingCsrf     = csrfToken;
                 this._pendingVerifier = verifier;
                 this._pendingHwId     = hardwareId;
                 this.log.warn('Blink 2FA erforderlich. Sende PIN per: sendTo("blink.0", "verifyPin", {pin: "123456"})');
                 return;
             }
-            if (loginResult !== 'SUCCESS') throw new Error(`Login fehlgeschlagen (Ergebnis: ${loginResult})`);
+            if (loginResult !== 'SUCCESS') throw new Error(`Login fehlgeschlagen (Status: ${loginResult})`);
 
-            const code = await this.oauthGetCode();
+            // Schritt 4: Authorization Code holen
+            const code = await this.oauthGetCode(oauthSession);
             if (!code) throw new Error('Authorization Code nicht erhalten');
             this.log.debug('Authorization Code erhalten.');
 
+            // Schritt 5: Code gegen Token tauschen
             const tokenData = await this.oauthExchangeCode(code, verifier, hardwareId);
             if (!tokenData) throw new Error('Token-Austausch fehlgeschlagen');
 
             await this.processTokenData(tokenData, hardwareId);
             this.log.info('Blink OAuth2 Login erfolgreich.');
+
         } catch (err) {
             this.log.error(`OAuth Login Fehler: ${err.message}`);
             this.setState('info.connection', false, true);
         }
     }
 
-    async oauthAuthorizeRequest(hardwareId, codeChallenge) {
+    async oauthAuthorizeRequest(session, hardwareId, codeChallenge) {
         const params = new URLSearchParams({
             app_brand: 'blink', app_version: '50.1',
             client_id: OAUTH_V2_CLIENT_ID,
             code_challenge: codeChallenge,
             code_challenge_method: 'S256',
             device_brand: 'Apple', device_model: 'iPhone16,1',
-            device_os: 'iOS', device_os_version: '18.7',
+             device_os_version: '26.1',
             hardware_id: hardwareId,
             redirect_uri: OAUTH_REDIRECT_URI,
             response_type: 'code',
-            scope: 'openid offline_access',
+            scope: 'client',
         });
         try {
-            await this.axiosSession.get(`${OAUTH_AUTHORIZE_URL}?${params}`, {
+            await session.get(`${OAUTH_AUTHORIZE_URL}?${params}`, {
                 headers: { 'User-Agent': OAUTH_USER_AGENT },
-                maxRedirects: 5,
+                maxRedirects: 10,
             });
         } catch (_) { /* Redirects ignorieren */ }
     }
 
-    async oauthGetCsrfToken() {
-        const resp = await this.axiosSession.get(OAUTH_SIGNIN_URL, {
+    async oauthGetCsrfToken(session) {
+        const resp = await session.get(OAUTH_SIGNIN_URL, {
             headers: {
                 'User-Agent': OAUTH_USER_AGENT,
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             },
         });
-        // Cookies fuer den naechsten Request speichern
-        if (resp.headers['set-cookie']) {
-            this._signinCookies = resp.headers['set-cookie']
-                .map(c => c.split(';')[0])
-                .join('; ');
-        }
-        // CSRF Token aus JSON im HTML extrahieren
         const m = resp.data.match(/"csrf-token":"([^"]+)"/);
         if (m) return m[1];
-        // Fallback
         const m2 = resp.data.match(/name=["']csrf-token["'][^>]*value=["']([^"']+)["']/);
         return m2 ? m2[1] : null;
     }
 
-    async oauthSignin(csrfToken) {
+    async oauthSignin(session, csrfToken) {
         const data = new URLSearchParams({
             username:     this.config.email,
             password:     this.config.password,
             'csrf-token': csrfToken,
         });
         try {
-            const resp = await this.axiosSession.post(OAUTH_SIGNIN_URL, data.toString(), {
+            const resp = await session.post(OAUTH_SIGNIN_URL, data.toString(), {
                 headers: {
                     'User-Agent':   OAUTH_USER_AGENT,
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Origin':       'https://api.oauth.blink.com',
                     'Referer':      OAUTH_SIGNIN_URL,
-                    'Cookie':       this._signinCookies || '',
                 },
                 maxRedirects: 0,
                 validateStatus: s => s < 600,
             });
-            this.log.debug(`Signin Status: ${resp.status}, Location: ${resp.headers['location'] || 'keine'}`);
+            this.log.debug(`Signin Status: ${resp.status}`);
             if (resp.status === 412) return '2FA_REQUIRED';
-            if ([200,301,302,303,307,308].includes(resp.status)) {
-                // Cookies aktualisieren
-                if (resp.headers['set-cookie']) {
-                    const newCookies = resp.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
-                    this._signinCookies = `${this._signinCookies}; ${newCookies}`;
-                }
-                return 'SUCCESS';
-            }
-            this.log.error(`Login mit Status ${resp.status}: ${JSON.stringify(resp.data).substring(0, 300)}`);
+            if ([200,301,302,303,307,308].includes(resp.status)) return 'SUCCESS';
+            this.log.error(`Login Status ${resp.status}: ${JSON.stringify(resp.data).substring(0, 300)}`);
             return null;
         } catch (err) {
             if (err.response && err.response.status === 412) return '2FA_REQUIRED';
@@ -213,19 +216,18 @@ class BlinkAdapter extends utils.Adapter {
         }
     }
 
-    async oauthVerify2fa(csrfToken, pin) {
+    async oauthVerify2fa(session, csrfToken, pin) {
         const data = new URLSearchParams({
             '2fa_code':   pin,
             'csrf-token': csrfToken,
             remember_me:  'false',
         });
-        const resp = await this.axiosSession.post(OAUTH_2FA_URL, data.toString(), {
+        const resp = await session.post(OAUTH_2FA_URL, data.toString(), {
             headers: {
                 'User-Agent':   OAUTH_USER_AGENT,
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Origin':       'https://api.oauth.blink.com',
                 'Referer':      OAUTH_SIGNIN_URL,
-                'Cookie':       this._signinCookies || '',
             },
             validateStatus: s => s < 600,
         });
@@ -235,13 +237,12 @@ class BlinkAdapter extends utils.Adapter {
         return false;
     }
 
-    async oauthGetCode() {
+    async oauthGetCode(session) {
         try {
-            const resp = await this.axiosSession.get(OAUTH_AUTHORIZE_URL, {
+            const resp = await session.get(OAUTH_AUTHORIZE_URL, {
                 headers: {
                     'User-Agent': OAUTH_USER_AGENT,
                     'Referer':    OAUTH_SIGNIN_URL,
-                    'Cookie':     this._signinCookies || '',
                 },
                 maxRedirects: 0,
                 validateStatus: s => s < 600,
@@ -271,7 +272,7 @@ class BlinkAdapter extends utils.Adapter {
             redirect_uri:  OAUTH_REDIRECT_URI,
             hardware_id:   hardwareId,
         });
-        const resp = await this.axiosSession.post(OAUTH_TOKEN_URL, data.toString(), {
+        const resp = await this.apiSession.post(OAUTH_TOKEN_URL, data.toString(), {
             headers: {
                 'User-Agent':   OAUTH_TOKEN_UA,
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -291,7 +292,7 @@ class BlinkAdapter extends utils.Adapter {
                 refresh_token: this.authData.refreshToken,
                 hardware_id:   this.authData.hardwareId,
             });
-            const resp = await this.axiosSession.post(OAUTH_TOKEN_URL, data.toString(), {
+            const resp = await this.apiSession.post(OAUTH_TOKEN_URL, data.toString(), {
                 headers: {
                     'User-Agent':   OAUTH_TOKEN_UA,
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -311,7 +312,7 @@ class BlinkAdapter extends utils.Adapter {
         const refreshToken = tokenData.refresh_token || null;
         let accountId = null, host = DEFAULT_BASE_URL;
         try {
-            const r = await this.axiosSession.get(TIER_ENDPOINT, {
+            const r = await this.apiSession.get(TIER_ENDPOINT, {
                 headers: {
                     'Authorization': `Bearer ${accessToken}`,
                     'Content-Type':  'application/json',
@@ -520,8 +521,6 @@ class BlinkAdapter extends utils.Adapter {
         }
     }
 
-    // ─── State Updates ────────────────────────────────────────────────────────
-
     async updateNetworkStates(net) {
         const id = `networks.${net.id}`;
         await this.setStateAsync(`${id}.name`,      { val: net.name || '', ack: true });
@@ -545,8 +544,8 @@ class BlinkAdapter extends utils.Adapter {
             await this.setStateAsync(`${id}.battery`, { val: pct, ack: true });
         }
         if (cam.temperature != null) {
-            await this.setStateAsync(`${id}.temperature`,  { val: cam.temperature,        ack: true });
-            await this.setStateAsync(`${id}.temperatureC`, { val: toC(cam.temperature),   ack: true });
+            await this.setStateAsync(`${id}.temperature`,  { val: cam.temperature,      ack: true });
+            await this.setStateAsync(`${id}.temperatureC`, { val: toC(cam.temperature), ack: true });
         }
         if (cam.signals && cam.signals.wifi != null)
             await this.setStateAsync(`${id}.wifiStrength`, { val: cam.signals.wifi, ack: true });
@@ -582,8 +581,6 @@ class BlinkAdapter extends utils.Adapter {
         await this.setStateAsync(`${pfx}.lastVideoTime`, { val: vid.created_at||'', ack: true });
     }
 
-    // ─── Kamera-Aktionen ──────────────────────────────────────────────────────
-
     async triggerSnapshot(networkId, cameraId, name) {
         try {
             await this.blinkRequest('post',
@@ -602,8 +599,6 @@ class BlinkAdapter extends utils.Adapter {
         await this.blinkRequest('post', `/api/v1/networks/${networkId}/disarm`);
         this.log.info(`Netzwerk ${networkId} unscharf gestellt.`);
     }
-
-    // ─── State Change Handler ─────────────────────────────────────────────────
 
     async onStateChange(id, state) {
         if (!state || state.ack) return;
@@ -627,8 +622,6 @@ class BlinkAdapter extends utils.Adapter {
         }
     }
 
-    // ─── Message Handler ──────────────────────────────────────────────────────
-
     async onMessage(obj) {
         if (!obj || !obj.command) return;
         if (obj.command === 'verifyPin') {
@@ -637,14 +630,15 @@ class BlinkAdapter extends utils.Adapter {
                 this.sendTo(obj.from, obj.command, { error: 'Kein PIN oder kein ausstehender Login' }, obj.callback);
                 return;
             }
-            const ok = await this.oauthVerify2fa(this._pendingCsrf, pin);
+            const ok = await this.oauthVerify2fa(this._pendingSession, this._pendingCsrf, pin);
             if (ok) {
-                const code = await this.oauthGetCode();
+                const code = await this.oauthGetCode(this._pendingSession);
                 if (code) {
                     const tokenData = await this.oauthExchangeCode(code, this._pendingVerifier, this._pendingHwId);
                     if (tokenData) {
                         await this.processTokenData(tokenData, this._pendingHwId);
-                        this._pendingCsrf = null; this._pendingVerifier = null; this._pendingHwId = null;
+                        this._pendingCsrf = null; this._pendingVerifier = null;
+                        this._pendingHwId = null; this._pendingSession = null;
                         this.sendTo(obj.from, obj.command, { success: true }, obj.callback);
                         return;
                     }
@@ -659,8 +653,6 @@ class BlinkAdapter extends utils.Adapter {
         }
     }
 
-    // ─── HTTP Helper ──────────────────────────────────────────────────────────
-
     async blinkRequest(method, endpoint, body = null) {
         if (!this.authData) throw new Error('Nicht authentifiziert');
         const url     = `${this.authData.host}${endpoint}`;
@@ -669,15 +661,15 @@ class BlinkAdapter extends utils.Adapter {
             'Content-Type':  'application/json',
         };
         const resp = method === 'get'
-            ? await this.axiosSession.get(url, { headers })
-            : await this.axiosSession.post(url, body || {}, { headers });
+            ? await this.apiSession.get(url, { headers })
+            : await this.apiSession.post(url, body || {}, { headers });
         return resp.data;
     }
 
     async downloadImage(url) {
         try {
             const fetchUrl = /\.(jpg|jpeg|png)$/i.test(url) ? url : url + '.jpg';
-            const resp = await this.axiosSession.get(fetchUrl, {
+            const resp = await this.apiSession.get(fetchUrl, {
                 responseType: 'arraybuffer',
                 headers: { 'Authorization': `Bearer ${this.authData.accessToken}` },
             });
