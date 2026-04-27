@@ -2,7 +2,6 @@
   "common": {
     "name": "blink",
     "version": "0.1.0",
-    "title": "Blink",
     "titleLang": {
       "en": "Blink",
       "de": "Blink",
@@ -63,7 +62,16 @@
     "news": {
       "0.1.0": {
         "en": "Initial release with OAuth2 PKCE login, live snapshots, motion detection and arm/disarm support.",
-        "de": "Erstveroeffentlichung mit OAuth2 PKCE Login, Live-Snapshots, Bewegungserkennung und Scharf-/Unscharf-Schaltung."
+        "de": "Erstveroeffentlichung mit OAuth2 PKCE Login, Live-Snapshots, Bewegungserkennung und Scharf-/Unscharf-Schaltung.",
+        "ru": "Первый выпуск с OAuth2 PKCE входом, живыми снимками и управлением охраной.",
+        "pt": "Versao inicial com login OAuth2 PKCE, snapshots ao vivo e suporte arm/disarm.",
+        "nl": "Eerste release met OAuth2 PKCE login, live snapshots en arm/disarm ondersteuning.",
+        "fr": "Version initiale avec connexion OAuth2 PKCE, snapshots en direct et support arm/disarm.",
+        "it": "Versione iniziale con login OAuth2 PKCE, snapshot live e supporto arm/disarm.",
+        "es": "Version inicial con inicio de sesion OAuth2 PKCE, instantaneas en vivo y soporte arm/disarm.",
+        "pl": "Pierwsze wydanie z logowaniem OAuth2 PKCE, zywymi snapshotami i wsparciem arm/disarm.",
+        "uk": "Початковий випуск з OAuth2 PKCE входом, живими знiмками та пiдтримкою постановки/зняття з охорони.",
+        "zh-cn": "初始版本，支持OAuth2 PKCE登录、实时快照和布防/撤防。"
       }
     }
   },
