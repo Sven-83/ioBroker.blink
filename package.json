@@ -1,35 +1,44 @@
 {
   "name": "iobroker.blink",
-  "version": "1.0.0",
-  "description": "ioBroker adapter for Blink cameras - live snapshots and full data access",
+  "version": "0.1.0",
+  "description": "ioBroker adapter for Blink cameras - live snapshots, motion detection and arm/disarm support",
   "author": {
-    "name": "Sven"
+    "name": "Sven-83"
   },
   "homepage": "https://github.com/Sven-83/ioBroker.blink",
   "license": "MIT",
   "keywords": [
     "ioBroker",
+    "iobroker-adapter",
     "blink",
     "camera",
     "security",
-    "smart home"
+    "alarm",
+    "smart-home",
+    "home-automation",
+    "amazon"
   ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Sven-83/ioBroker.blink"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
-    "@iobroker/adapter-core": "^3.0.0",
+    "@iobroker/adapter-core": "^3.2.3",
     "axios": "^1.6.0",
     "axios-cookiejar-support": "^5.0.0",
     "tough-cookie": "^4.1.3"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@iobroker/testing": "^5.1.1",
+    "mocha": "^10.0.0",
+    "chai": "^4.0.0"
+  },
   "main": "main.js",
   "scripts": {
-    "start": "node main.js"
+    "start": "node main.js",
+    "test": "mocha test/package.js --timeout 10000"
   }
 }
