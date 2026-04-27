@@ -1,151 +1,89 @@
+![Logo](admin/blink.png)
+
 # ioBroker.blink
 
-[!\[License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![NPM version](https://img.shields.io/npm/v/iobroker.blink.svg)](https://www.npmjs.com/package/iobroker.blink)
 
-Inoffizieller ioBroker-Adapter für Blink-Kameras. Liest alle Kameradaten aus und liefert Live-Snapshots.
+ioBroker adapter for Amazon Blink cameras and security networks.
 
-\---
+**Compatible cameras and devices:** see https://blinkforhome.com/
 
-## Features / Funktionen
+## Features
 
-* Live-Snapshots (Base64-JPEG direkt im State, sowie URL)
-* Batteriestatus, Temperatur, WLAN-Stärke
-* Scharf-/Unscharf-Schaltung pro System (Network)
-* Kamera ein-/ausschalten
-* Letzte Video-Events
-* Automatisches Token-Refresh
-* 2-Faktor-Authentifizierung (2FA) Unterstützung
-
-\---
+- OAuth2 PKCE login with 2FA SMS support
+- Live snapshots (manual, on motion detection, weekly scheduled)
+- Motion detection with automatic snapshot trigger
+- Arm/disarm security networks
+- Battery level monitoring
+- WiFi signal strength monitoring
+- Thumbnail image storage as files
+- Exponential backoff on connection failures
 
 ## Installation
 
-### Via GitHub (ioBroker Admin → Adapter → Von GitHub installieren)
-
-1. ioBroker Admin öffnen → **Adapter** → GitHub-Symbol (oben rechts)
-2. Tab **"Beliebig"**
-3. URL eingeben: `https://github.com/Sven-83/ioBroker.blink`
-4. **Installieren** klicken
-5. Instanz anlegen und Konfiguration öffnen
-
-### Manuell (SSH / Shell)
-
+Install via ioBroker Admin interface or:
 ```bash
-cd /opt/iobroker
-npm install https://github.com/Sven-83/ioBroker.blink
-iobroker add blink
+iobroker url https://github.com/Sven-83/ioBroker.blink
 ```
 
-\---
+## Configuration
 
-## Konfiguration
+1. Enter your Blink account email and password
+2. Start the adapter - it logs in automatically via OAuth2 PKCE
+3. If Blink requires 2FA, you will receive an SMS PIN. Send it via:
+   ```javascript
+   sendTo('blink.0', 'verifyPin', {pin: '123456'});
+   ```
 
-|Feld|Beschreibung|
-|-|-|
-|**E-Mail**|Blink-Account E-Mail|
-|**Passwort**|Blink-Account Passwort|
-|**2FA PIN**|Nach erstem Start: Blink schickt einen PIN per E-Mail. Diesen hier eintragen und Adapter neu starten. Danach kann das Feld leer bleiben.|
-|**Data Polling Interval**|Wie oft Kameradaten abgerufen werden (Sekunden)|
-|**Snapshot Interval**|Wie oft automatisch ein neuer Snapshot ausgelöst wird (0 = nur manuell)|
+## States
 
-### 2FA (Zwei-Faktor-Authentifizierung)
+### Networks (`blink.0.networks.<networkId>`)
+| State | Type | R/W | Description |
+|-------|------|-----|-------------|
+| name | string | R | Network name |
+| armed | boolean | R/W | Armed state (true = armed) |
+| enabled | boolean | R | Network enabled |
 
-Beim ersten Start sendet Blink eine E-Mail mit einem PIN-Code.
+### Cameras (`blink.0.networks.<networkId>.cameras.<cameraId>`)
+| State | Type | R/W | Description |
+|-------|------|-----|-------------|
+| name | string | R | Camera name |
+| online | boolean | R | Camera online |
+| batteryOk | boolean | R | Battery OK (false = low battery) |
+| batteryPercent | number | R | Battery level (%) |
+| temperatureC | number | R | Temperature (°C) |
+| motionAlert | boolean | R | Motion alert active |
+| thumbnail | string | R | Last thumbnail URL |
+| snapshot | button | W | Trigger new snapshot |
+| lastUpdated | string | R | Last update timestamp |
+| wifiStrength | number | R | WiFi signal strength (dBm) |
 
-1. Adapter starten (ohne PIN)
-2. PIN aus der Blink-E-Mail kopieren
-3. PIN in der Adapterkonfiguration eintragen
-4. Adapter neu starten
+## Dashboard
 
-Der Token wird danach gespeichert und der PIN wird nicht mehr benötigt.
-
-\---
-
-## Datenpunkte / States
-
-### System-Ebene
-
+A web dashboard is included (`blink-dashboard.html`). Copy it to the ioBroker web adapter www folder:
+```bash
+cp blink-dashboard.html /opt/iobroker/node_modules/iobroker.web/www/
 ```
-blink.0.networks.{networkId}.
-  ├── name              – Systemname
-  ├── armed             – Scharf (true/false) – beschreibbar!
-  ├── enabled           – Aktiviert
-  ├── networkId         – Interne ID
-  ├── arm               – Button: Scharf schalten
-  └── disarm            – Button: Unscharf schalten
-```
+Then access at: `http://RASPBERRY-IP:8082/blink-dashboard.html`
 
-### Kamera-Ebene
+**Security:** Enable authentication on the web adapter (Admin → Instances → web.0) to protect the dashboard from unauthorized access.
 
-```
-blink.0.networks.{networkId}.cameras.{cameraId}.
-  ├── name              – Kameraname
-  ├── enabled           – Kamera aktiviert
-  ├── online            – Online-Status
-  ├── battery           – Batterie (%)
-  ├── batteryVoltage    – Batteriespannung (mV)
-  ├── temperature       – Temperatur (°F)
-  ├── temperatureC      – Temperatur (°C)
-  ├── wifiStrength      – WLAN-Stärke (dBm)
-  ├── serial            – Seriennummer
-  ├── firmware          – Firmware-Version
-  ├── type              – Kameratyp
-  ├── status            – Statustext
-  ├── motionAlert       – Bewegungserkennung aktiv
-  ├── lastMotion        – Letzter Bewegungszeitpunkt
-  ├── thumbnail         – Thumbnail-URL
-  ├── thumbnailData     – Thumbnail als Base64-JPEG (data:image/jpeg;base64,...)
-  ├── lastVideo         – URL des letzten Videos
-  ├── lastVideoTime     – Zeitpunkt des letzten Videos
-  ├── snapshot          – Button: Neuen Snapshot auslösen
-  ├── enableCamera      – Button: Kamera einschalten
-  ├── disableCamera     – Button: Kamera ausschalten
-  └── lastUpdated       – Letzter Update-Zeitstempel
-```
+## Security
 
-\---
+- Credentials and tokens are stored **encrypted** in ioBroker native config (`encryptedNative`)
+- Tokens are protected from other adapters (`protectedNative`)
+- OAuth2 with PKCE flow - no password sent to third parties
+- Automatic token refresh with exponential backoff
 
-## Snapshot in VIS / Dashboard anzeigen
+## Changelog
 
-Den State `thumbnailData` enthält ein vollständiges Base64-kodiertes JPEG-Bild.
+### 0.1.0 (2026-04-26)
+- Initial release with OAuth2 PKCE login
+- Live snapshots on motion, manual trigger, weekly schedule
+- Arm/disarm network support
+- Battery and WiFi monitoring
 
-**ioBroker VIS:**
-Widget `Basic – HTML` mit folgendem Inhalt:
+## License
 
-```html
-<img src="{blink.0.networks.1.cameras.1.thumbnailData}" style="max-width:100%">
-```
-
-**Lovelace / Home Assistant über ioBroker:**
-State direkt als `camera`-Entity einbinden.
-
-\---
-
-## sendTo – PIN per Skript eingeben
-
-```javascript
-sendTo('blink.0', 'verifyPin', { pin: '123456' }, (result) => {
-    console.log(result); // { success: true }
-});
-```
-
-Status abfragen:
-
-```javascript
-sendTo('blink.0', 'getStatus', {}, (result) => {
-    console.log(result); // { connected: true, pinPending: false }
-});
-```
-
-\---
-
-## Hinweise
-
-* Die Blink-API ist **inoffiziell** (Reverse-Engineering) und kann sich jederzeit ändern.
-* Zu häufige Abfragen können zur Account-Sperrung führen. Empfohlen: ≥ 30 Sekunden Polling.
-* Unterstützte Geräte: Blink Outdoor, Indoor, Mini, XT, XT2, Doorbell
-
-## Lizenz / License
-
-MIT © 2024
-
+MIT License © 2026 Sven-83
