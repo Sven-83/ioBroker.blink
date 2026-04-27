@@ -1,62 +1,98 @@
 {
   "common": {
     "name": "blink",
-    "version": "1.0.0",
-    "title": "Blink Camera",
+    "version": "0.1.0",
+    "title": "Blink",
     "titleLang": {
-      "en": "Blink Camera",
-      "de": "Blink Kamera"
+      "en": "Blink",
+      "de": "Blink",
+      "ru": "Blink",
+      "pt": "Blink",
+      "nl": "Blink",
+      "fr": "Blink",
+      "it": "Blink",
+      "es": "Blink",
+      "pl": "Blink",
+      "uk": "Blink",
+      "zh-cn": "Blink"
     },
     "desc": {
-      "en": "Control and monitor Blink cameras: live snapshots, battery, temperature, arm/disarm",
-      "de": "Blink-Kameras steuern und überwachen: Live-Snapshots, Batterie, Temperatur, Scharf-/Unscharf-Schaltung"
+      "en": "Integrate Amazon Blink cameras and security networks. Supports live snapshots, motion detection, arm/disarm and battery monitoring.",
+      "de": "Amazon Blink Kameras und Sicherheitssysteme integrieren. Unterstuetzt Live-Snapshots, Bewegungserkennung, Scharf-/Unscharf-Schaltung und Batterieueberwachung.",
+      "ru": "Интеграция камер Amazon Blink и систем безопасности.",
+      "pt": "Integre cameras Amazon Blink e redes de seguranca.",
+      "nl": "Integreer Amazon Blink cameras en beveiligingsnetwerken.",
+      "fr": "Integrez les cameras Amazon Blink et les reseaux de securite.",
+      "it": "Integra le fotocamere Amazon Blink e le reti di sicurezza.",
+      "es": "Integre camaras Amazon Blink y redes de seguridad.",
+      "pl": "Integruj kamery Amazon Blink i sieci bezpieczenstwa.",
+      "uk": "Iнтегруйте камери Amazon Blink та мережi безпеки.",
+      "zh-cn": "集成Amazon Blink摄像头和安全网络。"
     },
-    "authors": ["Sven"],
-    "keywords": ["blink", "camera", "security", "snapshot"],
-    "license": "MIT",
-    "platform": "Javascript/Node.js",
-    "main": "main.js",
-    "icon": "https://raw.githubusercontent.com/Sven-83/iobroker.blink/main/admin/blink.png",
-"extIcon": "https://raw.githubusercontent.com/Sven-83/iobroker.blink/main/admin/blink.png",
-    "enabled": true,
-    "loglevel": "info",
+    "authors": ["Sven-83"],
+    "keywords": ["blink", "camera", "security", "amazon", "alarm", "smart-home"],
+    "licenseInformation": {
+      "type": "free",
+      "license": "MIT",
+      "link": "https://github.com/Sven-83/ioBroker.blink/blob/main/LICENSE"
+    },
     "mode": "daemon",
-    "type": "camera",
-    "messagebox": true,
-    "news": {
-      "1.0.0": {
-        "en": "Initial release",
-        "de": "Erstveröffentlichung"
+    "type": "alarm",
+    "connectionType": "cloud",
+    "dataSource": "poll",
+    "compact": true,
+    "adminUI": { "config": "json" },
+    "icon": "admin/blink.png",
+    "extIcon": "https://raw.githubusercontent.com/Sven-83/ioBroker.blink/main/admin/blink.png",
+    "readme": "https://github.com/Sven-83/ioBroker.blink/blob/main/README.md",
+    "docs": {
+      "en": "docs/en/README.md",
+      "de": "docs/de/README.md"
+    },
+    "loglevel": "info",
+    "tier": 2,
+    "encryptedNative": ["accessToken", "refreshToken", "password"],
+    "protectedNative": ["accessToken", "refreshToken", "password"],
+    "dependencies": [{ "js-controller": ">=5.0.19" }],
+    "globalDependencies": [{ "admin": ">=6.13.16" }],
+    "plugins": {
+      "sentry": {
+        "dsn": ""
       }
     },
-    "adminUI": {
-      "config": "json"
+    "news": {
+      "0.1.0": {
+        "en": "Initial release with OAuth2 PKCE login, live snapshots, motion detection and arm/disarm support.",
+        "de": "Erstveroeffentlichung mit OAuth2 PKCE Login, Live-Snapshots, Bewegungserkennung und Scharf-/Unscharf-Schaltung."
+      }
     }
   },
   "native": {
     "email": "",
     "password": "",
-    "pin": "",
-    "pollingInterval": 30,
-    "snapshotPollingInterval": 60,
-    "saveSnapshots": true,
-    "snapshotPath": ""
+    "accessToken": "",
+    "refreshToken": "",
+    "hardwareId": "",
+    "accountId": "",
+    "host": "",
+    "pollingInterval": 30
   },
   "objects": [],
   "instanceObjects": [
     {
       "_id": "info",
       "type": "channel",
-      "common": {
-        "name": "Information"
-      },
+      "common": { "name": "Information" },
       "native": {}
     },
     {
       "_id": "info.connection",
       "type": "state",
       "common": {
-        "name": "Connected to Blink",
+        "name": {
+          "en": "Device or service connected",
+          "de": "Geraet oder Dienst verbunden"
+        },
         "type": "boolean",
         "role": "indicator.connected",
         "read": true,
