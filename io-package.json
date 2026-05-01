@@ -1,38 +1,18 @@
-ackage · JSON
-Kopieren
-
 {
   "common": {
     "name": "blink",
     "version": "0.0.7",
     "titleLang": {
-      "en": "Blink",
-      "de": "Blink",
-      "ru": "Blink",
-      "pt": "Blink",
-      "nl": "Blink",
-      "fr": "Blink",
-      "it": "Blink",
-      "es": "Blink",
-      "pl": "Blink",
-      "uk": "Blink",
-      "zh-cn": "Blink"
+      "en": "Blink", "de": "Blink", "ru": "Blink", "pt": "Blink",
+      "nl": "Blink", "fr": "Blink", "it": "Blink", "es": "Blink",
+      "pl": "Blink", "uk": "Blink", "zh-cn": "Blink"
     },
     "desc": {
       "en": "Integrate Amazon Blink cameras and security networks.",
       "de": "Amazon Blink Kameras und Sicherheitssysteme integrieren."
     },
-    "authors": [
-      "Sven-83"
-    ],
-    "keywords": [
-      "blink",
-      "camera",
-      "security",
-      "amazon",
-      "alarm",
-      "smart-home"
-    ],
+    "authors": ["Sven-83"],
+    "keywords": ["blink", "camera", "security", "amazon", "alarm", "smart-home"],
     "licenseInformation": {
       "type": "free",
       "license": "MIT",
@@ -44,38 +24,16 @@ Kopieren
     "dataSource": "poll",
     "compact": true,
     "messagebox": true,
-    "adminUI": {
-      "config": "json"
-    },
+    "adminUI": { "config": "json" },
     "icon": "admin/blink.png",
     "extIcon": "https://raw.githubusercontent.com/Sven-83/ioBroker.blink/main/admin/blink.png",
     "readme": "https://github.com/Sven-83/ioBroker.blink/blob/main/README.md",
     "loglevel": "info",
     "tier": 2,
-    "encryptedNative": [
-      "accessToken",
-      "refreshToken",
-      "password",
-      "pin",
-      "pendingCookies"
-    ],
-    "protectedNative": [
-      "accessToken",
-      "refreshToken",
-      "password",
-      "pin",
-      "pendingCookies"
-    ],
-    "dependencies": [
-      {
-        "js-controller": ">=5.0.19"
-      }
-    ],
-    "globalDependencies": [
-      {
-        "admin": ">=6.13.16"
-      }
-    ],
+    "encryptedNative": ["accessToken", "refreshToken", "password", "pin", "pendingCookies"],
+    "protectedNative": ["accessToken", "refreshToken", "password", "pin", "pendingCookies"],
+    "dependencies": [{ "js-controller": ">=5.0.19" }],
+    "globalDependencies": [{ "admin": ">=6.13.16" }],
     "news": {
       "0.0.7": {
         "en": "PIN-based 2FA via adapter settings instead of script.",
@@ -100,25 +58,11 @@ Kopieren
   },
   "objects": [],
   "instanceObjects": [
-    {
-      "_id": "info",
-      "type": "channel",
-      "common": {
-        "name": "Information"
-      },
-      "native": {}
-    },
+    { "_id": "info", "type": "channel", "common": { "name": "Information" }, "native": {} },
     {
       "_id": "info.connection",
       "type": "state",
-      "common": {
-        "name": "Connected",
-        "type": "boolean",
-        "role": "indicator.connected",
-        "read": true,
-        "write": false,
-        "def": false
-      },
+      "common": { "name": "Connected", "type": "boolean", "role": "indicator.connected", "read": true, "write": false, "def": false },
       "native": {}
     }
   ]
