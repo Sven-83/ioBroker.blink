@@ -10,12 +10,27 @@
       "type": "text",
       "label": "Email address",
       "sm": 12,
-      "md": 6,
-      "validators": ["email"]
+      "md": 6
     },
     "password": {
       "type": "password",
       "label": "Password",
+      "sm": 12,
+      "md": 6
+    },
+    "_2faHeader": {
+      "type": "header",
+      "text": "2FA - Two-Factor Authentication",
+      "size": 3
+    },
+    "_2faInfo": {
+      "type": "staticText",
+      "text": "If Blink requires 2FA, you will receive an SMS PIN. Enter the 6-digit PIN below and SAVE settings. The adapter will use the PIN automatically.",
+      "sm": 12
+    },
+    "pin": {
+      "type": "text",
+      "label": "2FA PIN (only when SMS received)",
       "sm": 12,
       "md": 6
     },
@@ -32,16 +47,6 @@
       "default": 30,
       "sm": 12,
       "md": 6
-    },
-    "_infoHeader": {
-      "type": "header",
-      "text": "2FA Information",
-      "size": 3
-    },
-    "_2faInfo": {
-      "type": "staticText",
-      "text": "If Blink requires two-factor authentication, the adapter will log a warning. Send the SMS PIN via ioBroker script: sendTo('blink.0', 'verifyPin', {pin: '123456'})",
-      "sm": 12
     }
   }
 }
