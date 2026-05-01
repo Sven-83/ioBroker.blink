@@ -1,44 +1,46 @@
 {
   "type": "panel",
   "items": {
+    "_authHeader": {
+      "type": "header",
+      "text": "Blink Account",
+      "size": 3
+    },
     "email": {
       "type": "text",
-      "label": "Blink Email",
-      "sm": 12
+      "label": "Email address",
+      "sm": 12,
+      "md": 6,
+      "validators": ["email"]
     },
     "password": {
       "type": "password",
-      "label": "Passwort",
-      "sm": 12
+      "label": "Password",
+      "sm": 12,
+      "md": 6
     },
-    "pin": {
-      "type": "text",
-      "label": "2FA PIN (falls aktiv)",
-      "sm": 12
+    "_pollHeader": {
+      "type": "header",
+      "text": "Polling",
+      "size": 3
     },
     "pollingInterval": {
       "type": "number",
-      "label": "Polling Intervall (Sekunden)",
-      "sm": 12,
+      "label": "Polling interval (seconds)",
       "min": 10,
-      "default": 30
-    },
-    "snapshotPollingInterval": {
-      "type": "number",
-      "label": "Snapshot Intervall (Sekunden)",
+      "max": 3600,
+      "default": 30,
       "sm": 12,
-      "min": 10,
-      "default": 60
+      "md": 6
     },
-    "saveSnapshots": {
-      "type": "checkbox",
-      "label": "Snapshots speichern",
-      "sm": 12,
-      "default": true
+    "_infoHeader": {
+      "type": "header",
+      "text": "2FA Information",
+      "size": 3
     },
-    "snapshotPath": {
-      "type": "text",
-      "label": "Snapshot Pfad",
+    "_2faInfo": {
+      "type": "staticText",
+      "text": "If Blink requires two-factor authentication, the adapter will log a warning. Send the SMS PIN via ioBroker script: sendTo('blink.0', 'verifyPin', {pin: '123456'})",
       "sm": 12
     }
   }
