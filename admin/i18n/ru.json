@@ -1,0 +1,9 @@
+{
+  "Email address": "Адрес электронной почты",
+  "Password": "Пароль",
+  "Polling interval (seconds)": "Интервал опроса (секунды)",
+  "Blink Account": "Аккаунт Blink",
+  "Polling": "Опрос",
+  "2FA Information": "Информация о 2FA",
+  "If Blink requires two-factor authentication, the adapter will log a warning. Send the SMS PIN via ioBroker script: sendTo('blink.0', 'verifyPin', {pin: '123456'})": "Если Blink требует двухфакторную аутентификацию, адаптер запишет предупреждение. Отправьте PIN из SMS через скрипт ioBroker: sendTo('blink.0', 'verifyPin', {pin: '123456'})"
+}

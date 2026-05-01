@@ -5,8 +5,21 @@
   "author": { "name": "Sven-83" },
   "homepage": "https://github.com/Sven-83/ioBroker.blink",
   "license": "MIT",
-  "keywords": ["ioBroker","iobroker-adapter","blink","camera","security","alarm","smart-home","home-automation","amazon"],
-  "repository": { "type": "git", "url": "https://github.com/Sven-83/ioBroker.blink.git" },
+  "keywords": [
+    "ioBroker",
+    "iobroker-adapter",
+    "blink",
+    "camera",
+    "security",
+    "alarm",
+    "smart-home",
+    "home-automation",
+    "amazon"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sven-83/ioBroker.blink.git"
+  },
   "engines": { "node": ">=18.0.0" },
   "dependencies": {
     "@iobroker/adapter-core": "^3.2.3",
