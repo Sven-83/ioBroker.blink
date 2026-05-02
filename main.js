@@ -417,7 +417,7 @@ class BlinkAdapter extends utils.Adapter {
         await this.setStateAsync(`${id}.enabled`,     { val: cam.enabled!=null?!!cam.enabled:true, ack: true });
         await this.setStateAsync(`${id}.serial`,      { val: cam.serial||'', ack: true });
         await this.setStateAsync(`${id}.firmware`,    { val: cam.fw_version||cam.firmware||'', ack: true });
-        await this.setStateAsync(`${id}.online`,      { val: cam.status==='online', ack: true });
+        await this.setStateAsync(`${id}.online`,      { val: cam.status==='online' || cam.status==='done', ack: true });
         await this.setStateAsync(`${id}.motionAlert`, { val: !!cam.motion_alert, ack: true });
         await this.setStateAsync(`${id}.lastUpdated`, { val: new Date().toISOString(), ack: true });
         if (cam.battery != null) await this.setStateAsync(`${id}.battery`, { val: typeof cam.battery==='string'?(cam.battery==='ok'?100:20):cam.battery, ack: true });
@@ -450,7 +450,7 @@ class BlinkAdapter extends utils.Adapter {
 
     async triggerSnapshot(networkId, cameraId, name) {
         try {
-            await this.blinkRequest('post', `/api/v5/accounts/${this.authData.accountId}/networks/${networkId}/cameras/${cameraId}/thumbnail`);
+            await this.blinkRequest('post', `/network/${networkId}/camera/${cameraId}/thumbnail`);
             this.log.info(`Snapshot ausgeloest fuer ${name || cameraId}`);
         } catch (err) { this.log.warn(`Snapshot Fehler ${name||cameraId}: ${err.message}`); }
     }
