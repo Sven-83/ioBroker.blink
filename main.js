@@ -448,10 +448,17 @@ class BlinkAdapter extends utils.Adapter {
         await this.setStateAsync(`${pfx}.lastVideoTime`, { val: vid.created_at||'', ack: true });
     }
 
-    async triggerSnapshot(networkId, cameraId, name) {
+    async triggerSnapshot(networkId, cameraId, name, isOwl = false) {
+        // Owl/Mini Kameras (kabelgebunden) brauchen einen anderen Endpoint
+        const OWL_IDS = [683562, 784355, 687635, 687342];
+        const owl = isOwl || OWL_IDS.includes(Number(cameraId));
         try {
-            await this.blinkRequest('post', `/network/${networkId}/camera/${cameraId}/thumbnail`);
-            this.log.info(`Snapshot ausgeloest fuer ${name || cameraId}`);
+            if (owl) {
+                await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/networks/${networkId}/owls/${cameraId}/thumbnail`);
+            } else {
+                await this.blinkRequest('post', `/network/${networkId}/camera/${cameraId}/thumbnail`);
+            }
+            this.log.info(`Snapshot ausgeloest fuer ${name || cameraId}${owl ? ' (Owl/Mini)' : ''}`);
         } catch (err) { this.log.warn(`Snapshot Fehler ${name||cameraId}: ${err.message}`); }
     }
 
