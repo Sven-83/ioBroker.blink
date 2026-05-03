@@ -462,8 +462,18 @@ class BlinkAdapter extends utils.Adapter {
         } catch (err) { this.log.warn(`Snapshot Fehler ${name||cameraId}: ${err.message}`); }
     }
 
-    async armNetwork(networkId) { await this.blinkRequest('post', `/api/v1/networks/${networkId}/arm`); this.log.info(`Netzwerk ${networkId} scharf.`); }
-    async disarmNetwork(networkId) { await this.blinkRequest('post', `/api/v1/networks/${networkId}/disarm`); this.log.info(`Netzwerk ${networkId} unscharf.`); }
+    async armNetwork(networkId) {
+        try {
+            await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/networks/${networkId}/arm`);
+            this.log.info(`Netzwerk ${networkId} scharf.`);
+        } catch (err) { this.log.warn(`Arm Fehler ${networkId}: ${err.message}`); }
+    }
+    async disarmNetwork(networkId) {
+        try {
+            await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/networks/${networkId}/disarm`);
+            this.log.info(`Netzwerk ${networkId} unscharf.`);
+        } catch (err) { this.log.warn(`Disarm Fehler ${networkId}: ${err.message}`); }
+    }
 
     async onStateChange(id, state) {
         if (!state || state.ack) return;
