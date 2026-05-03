@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=1280"/>
+<title>Blink Überwachung</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif}
+body{background:#111;color:#eee;font-size:12px;overflow:hidden}
+.dash{padding:6px;width:1280px;height:800px;display:flex;flex-direction:column}
+.hdr{display:flex;align-items:center;justify-content:space-between;background:#1a1a1a;border:0.5px solid #333;border-radius:6px;padding:6px 12px;margin-bottom:6px;flex-shrink:0}
+.hdr-l .t{font-size:14px;font-weight:bold;color:#fff;display:flex;align-items:center;gap:6px}
+.hdr-l .s{font-size:10px;color:#666;margin-top:1px}
+.hdr-r{display:flex;align-items:center;gap:6px}
+.cdot{width:7px;height:7px;border-radius:50%;background:#555;display:inline-block;transition:background 0.3s}
+.cdot.on{background:#4caf50}
+.ctext{font-size:11px;color:#888}
+.ctext.on{color:#4caf50}
+.ctime{font-size:10px;color:#555}
+.bhdr{background:#1a3a5f;color:#6ab0f5;border:0.5px solid #2a5a9f;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer}
+.tabs{display:flex;gap:3px;flex-shrink:0}
+.tab{padding:6px 20px;border-radius:6px 6px 0 0;font-size:12px;font-weight:bold;cursor:pointer;border:0.5px solid #2a2a2a;display:flex;align-items:center;gap:6px;user-select:none}
+.tab.active{background:#1a1a1a;color:#fff;border-bottom:0.5px solid #1a1a1a}
+.tab.inactive{background:#131313;color:#555}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dr{background:#e53935}.dg{background:#43a047}
+.tc{font-size:10px;background:#252525;color:#777;border-radius:10px;padding:1px 5px}
+.panel{background:#1a1a1a;border:0.5px solid #2a2a2a;border-radius:0 6px 6px 6px;overflow:hidden;flex:1;display:flex;flex-direction:column}
+.phdr{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-bottom:0.5px solid #252525;flex-shrink:0}
+.ptitle{font-size:13px;font-weight:bold;color:#fff;display:flex;align-items:center;gap:5px}
+.psub{font-size:10px;color:#555;margin-top:1px}
+.ac{display:flex;align-items:center;gap:4px}
+.ab{font-size:10px;font-weight:bold;padding:2px 7px;border-radius:3px}
+.aon{color:#ff5252;background:#2a1212;border:0.5px solid #c62828}
+.aoff{color:#66bb6a;background:#122a12;border:0.5px solid #2e7d32}
+.barm{background:#122a12;color:#66bb6a;border:0.5px solid #2e7d32;border-radius:3px;padding:2px 9px;font-size:10px;cursor:pointer}
+.bdis{background:#2a1212;color:#ef9a9a;border:0.5px solid #c62828;border-radius:3px;padding:2px 9px;font-size:10px;cursor:pointer}
+.bsall{background:#1a3a5f;color:#6ab0f5;border:0.5px solid #2a5a9f;border-radius:3px;padding:2px 9px;font-size:10px;cursor:pointer}
+.g5{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;padding:6px}
+.g2{display:grid;grid-template-columns:repeat(2,1fr);gap:5px;padding:6px;max-width:500px}
+.cam{background:#0e0e0e;border-radius:5px;border:0.5px solid #252525;overflow:hidden}
+.cam.offline{border-color:#4a2020}
+.ctop{display:flex;align-items:center;gap:3px;padding:3px 6px;height:22px}
+.badge{font-size:9px;padding:1px 4px;border-radius:2px;font-weight:bold}
+.bon{background:#122a12;color:#81c784;border:0.5px solid #2e7d32}
+.boff{background:#2a1212;color:#ef9a9a;border:0.5px solid #c62828}
+.bmov{background:#12203a;color:#64b5f6;border:0.5px solid #1565c0}
+.cimg{width:100%;height:110px;background:#181818;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.cimg img{width:100%;height:100%;object-fit:cover;display:none}
+.cimg img.loaded{display:block}
+.cph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;position:absolute}
+.cts{position:absolute;bottom:2px;left:4px;font-size:9px;color:#bbb;background:rgba(0,0,0,0.7);padding:1px 3px;border-radius:2px}
+.cname{background:#1e1e1e;padding:3px 6px;font-size:10px;font-weight:bold;color:#ddd;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cstats{display:flex;gap:3px;padding:2px 6px;background:#141414;height:20px;align-items:center}
+.bbat{background:#122a12;color:#81c784;border:0.5px solid #2e7d32}
+.bbatl{background:#2a1f12;color:#ffb74d;border:0.5px solid #e65100}
+.bbatc{background:#2a1212;color:#ef9a9a;border:0.5px solid #c62828}
+.cbtns{display:flex;gap:2px;padding:3px 6px}
+.bsnap{background:#12203a;color:#64b5f6;border:0.5px solid #1565c0;border-radius:3px;padding:2px 0;font-size:9px;cursor:pointer;flex:1;text-align:center}
+.bein{background:#122a12;color:#81c784;border:0.5px solid #2e7d32;border-radius:3px;padding:2px 0;font-size:9px;cursor:pointer;flex:1;text-align:center}
+.baus{background:#2a1212;color:#ef9a9a;border:0.5px solid #c62828;border-radius:3px;padding:2px 0;font-size:9px;cursor:pointer;flex:1;text-align:center}
+.hidden{display:none!important}
+.foot{text-align:center;font-size:9px;color:#333;padding:3px;flex-shrink:0}
+</style>
+</head>
+<body>
+<div class="dash">
+  <div class="hdr">
+    <div class="hdr-l">
+      <div class="t">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6ab0f5" stroke-width="2"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="M17 9l5-3v12l-5-3"/></svg>
+        Blink Ueberwachung
+      </div>
+      <div class="s">3 Systeme - 17 Kameras</div>
+    </div>
+    <div class="hdr-r">
+      <span class="cdot" id="connDot"></span>
+      <span class="ctext" id="connText">Verbinde...</span>
+      <span class="ctime" id="connTime"></span>
+      <button class="bhdr" onclick="snapAll()">Alle Snappen</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" id="tab-wohnung" onclick="showTab('wohnung')">
+      <span class="dot dr" id="tdot-454451"></span> Wohnung <span class="tc">5</span>
+    </div>
+    <div class="tab inactive" id="tab-keller" onclick="showTab('keller')">
+      <span class="dot dr" id="tdot-464486"></span> Keller <span class="tc">2</span>
+    </div>
+    <div class="tab inactive" id="tab-garten" onclick="showTab('garten')">
+      <span class="dot dg" id="tdot-476330"></span> Garten <span class="tc">10</span>
+    </div>
+  </div>
+
+  <div id="panel-wohnung" class="panel">
+    <div class="phdr">
+      <div><div class="ptitle">Wohnung</div><div class="psub">5 Kameras - Netzwerk 454451</div></div>
+      <div class="ac">
+        <span class="ab" id="armed-454451">-</span>
+        <button class="barm" onclick="arm(454451)">Scharf</button>
+        <button class="bdis" onclick="disarm(454451)">Unscharf</button>
+        <button class="bsall" onclick="snapNet(454451)">Alle Snappen</button>
+      </div>
+    </div>
+    <div class="g5">
+      <div id="cam-1560739" class="cam"></div>
+      <div id="cam-721232" class="cam"></div>
+      <div id="cam-721364" class="cam"></div>
+      <div id="cam-721450" class="cam"></div>
+      <div id="cam-721510" class="cam"></div>
+    </div>
+  </div>
+
+  <div id="panel-keller" class="panel hidden">
+    <div class="phdr">
+      <div><div class="ptitle">Keller</div><div class="psub">2 Kameras - Netzwerk 464486</div></div>
+      <div class="ac">
+        <span class="ab" id="armed-464486">-</span>
+        <button class="barm" onclick="arm(464486)">Scharf</button>
+        <button class="bdis" onclick="disarm(464486)">Unscharf</button>
+        <button class="bsall" onclick="snapNet(464486)">Alle Snappen</button>
+      </div>
+    </div>
+    <div class="g2">
+      <div id="cam-721622" class="cam"></div>
+      <div id="cam-722032" class="cam"></div>
+    </div>
+  </div>
+
+  <div id="panel-garten" class="panel hidden">
+    <div class="phdr">
+      <div><div class="ptitle">Garten</div><div class="psub">10 Kameras - Netzwerk 476330</div></div>
+      <div class="ac">
+        <span class="ab" id="armed-476330">-</span>
+        <button class="barm" onclick="arm(476330)">Scharf</button>
+        <button class="bdis" onclick="disarm(476330)">Unscharf</button>
+        <button class="bsall" onclick="snapNet(476330)">Alle Snappen</button>
+      </div>
+    </div>
+    <div class="g5">
+      <div id="cam-1286459" class="cam"></div>
+      <div id="cam-1286474" class="cam"></div>
+      <div id="cam-1538760" class="cam"></div>
+      <div id="cam-683562" class="cam"></div>
+      <div id="cam-687342" class="cam"></div>
+      <div id="cam-687635" class="cam"></div>
+      <div id="cam-735717" class="cam"></div>
+      <div id="cam-735824" class="cam"></div>
+      <div id="cam-736546" class="cam"></div>
+      <div id="cam-784355" class="cam"></div>
+    </div>
+  </div>
+
+  <div class="foot">ioBroker - Blink Adapter v1.0 - 3 Systeme - 17 Kameras - Snapshots: bei Bewegung (scharf) + Samstag 12:00 - Manuell per Button</div>
+</div>
+
+<script>
+var CAMERAS = {
+  1560739: {net:454451, name:'Aquarium'},
+  721232:  {net:454451, name:'Wohnzimmer'},
+  721364:  {net:454451, name:'Kueche'},
+  721450:  {net:454451, name:'Haustuer'},
+  721510:  {net:454451, name:'Flur'},
+  721622:  {net:464486, name:'Keller'},
+  722032:  {net:464486, name:'Garage'},
+  1286459: {net:476330, name:'Terasse Sascha'},
+  1286474: {net:476330, name:'Terassentuer'},
+  1538760: {net:476330, name:'Garten'},
+  683562:  {net:476330, name:'Seite Bude rechts'},
+  687342:  {net:476330, name:'Terrasse Hannah'},
+  687635:  {net:476330, name:'Terrasse Esstisch'},
+  735717:  {net:476330, name:'Terrasse'},
+  735824:  {net:476330, name:'Seite'},
+  736546:  {net:476330, name:'Vorgarten'},
+  784355:  {net:476330, name:'Seite Bude links'}
+};
+
+var NETWORKS = [454451, 464486, 476330];
+var states = {};
+var conn;
+
+function batClass(v) {
+  if (v === null || v === undefined) return 'bbat';
+  if (v <= 20) return 'bbatc';
+  if (v <= 40) return 'bbatl';
+  return 'bbat';
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  try {
+    var d = new Date(iso);
+    return d.toLocaleDateString('de',{day:'2-digit',month:'2-digit'}) + ' ' +
+           d.toLocaleTimeString('de',{hour:'2-digit',minute:'2-digit'});
+  } catch(e) { return ''; }
+}
+
+function renderCam(camId) {
+  var el = document.getElementById('cam-' + camId);
+  if (!el) return;
+  var info = CAMERAS[camId];
+  var net = info.net;
+  var base = 'blink.0.networks.' + net + '.cameras.' + camId;
+  var online = states[base + '.online'];
+  var motion = states[base + '.motionAlert'];
+  var bat    = states[base + '.battery'];
+  var thumb  = states[base + '.thumbnailData'];
+  var upd    = states[base + '.lastUpdated'];
+
+  el.className = 'cam' + (online === false ? ' offline' : '');
+
+  var batVal = (bat !== undefined && bat !== null) ? Math.round(bat) : null;
+  var batCls = batClass(batVal);
+  var batText = batVal === null ? null : (batVal <= 20 ? '🪫 Low' : '🔋 OK');
+
+  el.innerHTML =
+    '<div class="ctop">' +
+      '<span class="badge ' + (online ? 'bon' : 'boff') + '">' + (online ? 'Online' : 'Offline') + '</span>' +
+      (motion ? '<span class="badge bmov">Bewegung</span>' : '') +
+    '</div>' +
+    '<div class="cimg">' +
+      (thumb ? '<img src="' + thumb + '" onload="this.classList.add(\'loaded\')" onerror="this.style.display=\'none\'">' : '') +
+      '<div class="cph" style="' + (thumb ? 'display:none' : '') + '">' +
+        '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" opacity="0.1"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="M17 9l5-3v12l-5-3"/></svg>' +
+      '</div>' +
+      '<span class="cts">' + fmtTime(upd) + '</span>' +
+    '</div>' +
+    '<div class="cname">' + info.name + '</div>' +
+    '<div class="cstats">' +
+      (batText !== null ? '<span class="badge ' + batCls + '">' + batText + '</span>' : '') +
+    '</div>' +
+    '<div class="cbtns">' +
+      '<button class="bsnap" onclick="snap(' + net + ',' + camId + ')">Snap</button>' +
+
+    '</div>';
+}
+
+function renderArmed(netId) {
+  var badge = document.getElementById('armed-' + netId);
+  var dot   = document.getElementById('tdot-' + netId);
+  if (!badge) return;
+  var armed = states['blink.0.networks.' + netId + '.armed'];
+  if (armed) {
+    badge.textContent = 'SCHARF';
+    badge.className = 'ab aon';
+    if (dot) dot.className = 'dot dr';
+  } else {
+    badge.textContent = 'UNSCHARF';
+    badge.className = 'ab aoff';
+    if (dot) dot.className = 'dot dg';
+  }
+}
+
+function showTab(name) {
+  ['wohnung','keller','garten'].forEach(function(t) {
+    document.getElementById('panel-' + t).classList.add('hidden');
+    document.getElementById('tab-' + t).className = 'tab inactive';
+  });
+  document.getElementById('panel-' + name).classList.remove('hidden');
+  document.getElementById('tab-' + name).className = 'tab active';
+}
+
+function snap(net, cam) {
+  conn.emit('setState', 'blink.0.networks.' + net + '.cameras.' + cam + '.snapshot', {val: true, ack: false});
+}
+
+function enable(net, cam, val) {
+  conn.emit('setState', 'blink.0.networks.' + net + '.cameras.' + cam + '.enabled', {val: val, ack: false});
+}
+
+function arm(net) {
+  conn.emit('setState', 'blink.0.networks.' + net + '.armed', {val: true, ack: false});
+}
+
+function disarm(net) {
+  conn.emit('setState', 'blink.0.networks.' + net + '.armed', {val: false, ack: false});
+}
+
+function snapNet(net) {
+  Object.keys(CAMERAS).forEach(function(camId) {
+    if (CAMERAS[camId].net === net) snap(net, parseInt(camId));
+  });
+}
+
+function snapAll() {
+  Object.keys(CAMERAS).forEach(function(camId) {
+    snap(CAMERAS[camId].net, parseInt(camId));
+  });
+}
+
+function updateTime() {
+  var el = document.getElementById('connTime');
+  if (el) {
+    var now = new Date();
+    el.textContent = now.toLocaleDateString('de',{day:'2-digit',month:'2-digit'}) + ' ' +
+                     now.toLocaleTimeString('de',{hour:'2-digit',minute:'2-digit'});
+  }
+}
+
+var SUBSCRIBE_IDS = [];
+Object.keys(CAMERAS).forEach(function(camId) {
+  var net = CAMERAS[camId].net;
+  var base = 'blink.0.networks.' + net + '.cameras.' + camId;
+  ['online','motionAlert','battery','thumbnailData','lastUpdated'].forEach(function(k) {
+    SUBSCRIBE_IDS.push(base + '.' + k);
+  });
+});
+NETWORKS.forEach(function(net) {
+  SUBSCRIBE_IDS.push('blink.0.networks.' + net + '.armed');
+});
+
+Object.keys(CAMERAS).forEach(function(camId) { renderCam(camId); });
+NETWORKS.forEach(function(net) { renderArmed(net); });
+
+conn = io();
+
+conn.on('connect', function() {
+  document.getElementById('connDot').className = 'cdot on';
+  document.getElementById('connText').className = 'ctext on';
+  document.getElementById('connText').textContent = 'Verbunden';
+  conn.emit('subscribe', SUBSCRIBE_IDS);
+  conn.emit('getStates', SUBSCRIBE_IDS, function(err, data) {
+    if (data) {
+      Object.keys(data).forEach(function(id) {
+        if (data[id]) states[id] = data[id].val;
+      });
+      Object.keys(CAMERAS).forEach(function(camId) { renderCam(camId); });
+      NETWORKS.forEach(function(net) { renderArmed(net); });
+    }
+  });
+});
+
+conn.on('disconnect', function() {
+  document.getElementById('connDot').className = 'cdot';
+  document.getElementById('connText').className = 'ctext';
+  document.getElementById('connText').textContent = 'Getrennt';
+});
+
+conn.on('stateChange', function(id, state) {
+  if (!state) return;
+  states[id] = state.val;
+  Object.keys(CAMERAS).forEach(function(camId) {
+    var base = 'blink.0.networks.' + CAMERAS[camId].net + '.cameras.' + camId;
+    if (id.indexOf(base) === 0) renderCam(camId);
+  });
+  NETWORKS.forEach(function(net) {
+    if (id === 'blink.0.networks.' + net + '.armed') renderArmed(net);
+  });
+});
+
+updateTime();
+setInterval(updateTime, 60000);
+</script>
+</body>
+</html>
