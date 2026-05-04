@@ -536,7 +536,7 @@ class BlinkAdapter extends utils.Adapter {
                     networkId:  v.network_id,
                     networkName: v.network_name || '',
                     createdAt:  v.created_at,
-                    address:    v.media ? (v.media.startsWith('http') ? v.media : `${this.authData.host}${v.media}`) : '',
+                    address:    v.media ? (v.media.startsWith('http') ? v.media : `${this.authData.host}${v.media}`) : (v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : ''),
                     thumbnail:  v.thumbnail ? (v.thumbnail.startsWith('http') ? v.thumbnail : `${this.authData.host}${v.thumbnail}`) : '',
                     viewed:     !!v.viewed,
                 }));
@@ -563,7 +563,7 @@ class BlinkAdapter extends utils.Adapter {
                         cameraName: v.camera_name || v.device_name || '',
                         networkId:  v.network_id,
                         createdAt:  v.created_at,
-                        address:    v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : '',
+                        address:    v.media ? (v.media.startsWith('http') ? v.media : `${this.authData.host}${v.media}`) : (v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : ''),
                         thumbnail:  v.thumbnail ? (v.thumbnail.startsWith('http') ? v.thumbnail : `${this.authData.host}${v.thumbnail}`) : '',
                         viewed:     !!v.viewed,
                     }));
@@ -627,7 +627,7 @@ class BlinkAdapter extends utils.Adapter {
                     cameraName: v.camera_name || v.device_name || '',
                     networkId: v.network_id,
                     createdAt: v.created_at,
-                    address:   v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : '',
+                    address:   v.media ? (v.media.startsWith('http') ? v.media : `${this.authData.host}${v.media}`) : (v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : ''),
                     thumbnail: v.thumbnail ? (v.thumbnail.startsWith('http') ? v.thumbnail : `${this.authData.host}${v.thumbnail}`) : '',
                     viewed:    !!v.viewed,
                     size:      v.size || 0,
