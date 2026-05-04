@@ -103,6 +103,7 @@ class BlinkAdapter extends utils.Adapter {
         try {
             if (this.pollingTimer) clearInterval(this.pollingTimer);
             if (this.weeklyTimer)  clearTimeout(this.weeklyTimer);
+            if (this._proxyServer) this._proxyServer.close();
         } catch (_) {}
         callback();
     }
@@ -298,7 +299,45 @@ class BlinkAdapter extends utils.Adapter {
         this.fetchAllData();
         this.pollingTimer = setInterval(() => this.fetchAllData(), ms);
         this.scheduleWeeklySnapshot();
+        this.startProxyServer();
         this.log.info('Polling gestartet.');
+    }
+
+    startProxyServer() {
+        const http = require('http');
+        const proxyPort = 8765;
+        if (this._proxyServer) return;
+        this._proxyServer = http.createServer(async (req, res) => {
+            // CORS Header
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET');
+            if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+            // URL: /proxy?url=https://rest-e002...
+            const urlParams = new URL(req.url, 'http://localhost').searchParams;
+            const targetUrl = urlParams.get('url');
+            if (!targetUrl || !this.authData) { res.writeHead(400); res.end('Bad Request'); return; }
+
+            try {
+                const https = require('https');
+                const parsed = new URL(targetUrl);
+                const proxyReq = https.get({
+                    hostname: parsed.hostname,
+                    path: parsed.pathname + parsed.search,
+                    headers: { 'Authorization': `Bearer ${this.authData.accessToken}` }
+                }, (proxyRes) => {
+                    res.writeHead(proxyRes.statusCode, {
+                        'Content-Type': proxyRes.headers['content-type'] || 'application/octet-stream',
+                        'Access-Control-Allow-Origin': '*',
+                    });
+                    proxyRes.pipe(res);
+                });
+                proxyReq.on('error', (e) => { res.writeHead(500); res.end(e.message); });
+            } catch (e) { res.writeHead(500); res.end(e.message); }
+        });
+        this._proxyServer.listen(proxyPort, () => {
+            this.log.info(`Blink Proxy Server laeuft auf Port ${proxyPort}`);
+        });
     }
 
     scheduleWeeklySnapshot() {
