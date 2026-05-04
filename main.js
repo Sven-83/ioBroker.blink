@@ -60,6 +60,10 @@ class BlinkAdapter extends utils.Adapter {
     async onReady() {
         // Subscriptions registrieren - MUSS in onReady sein
         this.subscribeStates('*');
+        // Video Archiv States anlegen
+        await this.setObjectNotExistsAsync('videoRequest', { type: 'state', common: { name: 'Video Anfrage', type: 'number', role: 'value', read: true, write: true, def: 0 }, native: {} });
+        await this.setObjectNotExistsAsync('videoList', { type: 'state', common: { name: 'Video Liste', type: 'string', role: 'json', read: true, write: false, def: '[]' }, native: {} });
+        await this.setObjectNotExistsAsync('deleteVideoIds', { type: 'state', common: { name: 'Videos loeschen IDs', type: 'string', role: 'json', read: true, write: true, def: '' }, native: {} });
 
         this.setState('info.connection', false, true);
         if (!this.config.email || !this.config.password) {
@@ -479,6 +483,57 @@ class BlinkAdapter extends utils.Adapter {
         if (!state || state.ack) return;
         this.log.debug(`State geaendert: ${id}`);
         const parts = id.replace(`${this.namespace}.`, '').split('.');
+
+        // Video Archiv
+        if (parts[0] === 'videoRequest' && state.val) {
+            this.log.info('Video Archiv wird abgerufen...');
+            try {
+                const page = typeof state.val === 'number' ? state.val : 1;
+                const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/videos/changed?page=${page}`);
+                const videos = (data.videos || []).map(v => ({
+                    id:         v.id,
+                    cameraName: v.camera_name || v.device_name || '',
+                    networkId:  v.network_id,
+                    createdAt:  v.created_at,
+                    address:    v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : '',
+                    thumbnail:  v.thumbnail ? (v.thumbnail.startsWith('http') ? v.thumbnail : `${this.authData.host}${v.thumbnail}`) : '',
+                    viewed:     !!v.viewed,
+                }));
+                await this.setStateAsync('videoList', { val: JSON.stringify(videos), ack: true });
+                this.log.info(`${videos.length} Videos abgerufen.`);
+            } catch (err) {
+                this.log.warn(`Video Abruf Fehler: ${err.message}`);
+                await this.setStateAsync('videoList', { val: JSON.stringify([]), ack: true });
+            }
+            return;
+        }
+
+        // Videos löschen
+        if (parts[0] === 'deleteVideoIds' && state.val) {
+            try {
+                const ids = JSON.parse(state.val);
+                if (ids && ids.length) {
+                    await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/videos/delete`, { ids });
+                    this.log.info(`Videos geloescht: ${ids.join(', ')}`);
+                    // Liste neu laden
+                    const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/videos/changed?page=1`);
+                    const videos = (data.videos || []).map(v => ({
+                        id:         v.id,
+                        cameraName: v.camera_name || v.device_name || '',
+                        networkId:  v.network_id,
+                        createdAt:  v.created_at,
+                        address:    v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : '',
+                        thumbnail:  v.thumbnail ? (v.thumbnail.startsWith('http') ? v.thumbnail : `${this.authData.host}${v.thumbnail}`) : '',
+                        viewed:     !!v.viewed,
+                    }));
+                    await this.setStateAsync('videoList', { val: JSON.stringify(videos), ack: true });
+                }
+            } catch (err) {
+                this.log.warn(`Video Loeschen Fehler: ${err.message}`);
+            }
+            return;
+        }
+
         if (parts[0] !== 'networks') return;
         const networkId = parseInt(parts[1]);
         if (parts[2] === 'cameras') {
