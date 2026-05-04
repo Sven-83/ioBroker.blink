@@ -489,13 +489,15 @@ class BlinkAdapter extends utils.Adapter {
             this.log.info('Video Archiv wird abgerufen...');
             try {
                 const page = typeof state.val === 'number' ? state.val : 1;
-                const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/videos/changed?page=${page}`);
-                const videos = (data.videos || []).map(v => ({
+                const since = '1970-01-01T00:00:00.000Z';
+                const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/media/changed?since=${encodeURIComponent(since)}&page=${page}`);
+                const videos = (data.media || []).filter(v => v.type === 'video').map(v => ({
                     id:         v.id,
-                    cameraName: v.camera_name || v.device_name || '',
+                    cameraName: v.device_name || v.camera_name || '',
                     networkId:  v.network_id,
+                    networkName: v.network_name || '',
                     createdAt:  v.created_at,
-                    address:    v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : '',
+                    address:    v.media ? (v.media.startsWith('http') ? v.media : `${this.authData.host}${v.media}`) : '',
                     thumbnail:  v.thumbnail ? (v.thumbnail.startsWith('http') ? v.thumbnail : `${this.authData.host}${v.thumbnail}`) : '',
                     viewed:     !!v.viewed,
                 }));
@@ -513,11 +515,11 @@ class BlinkAdapter extends utils.Adapter {
             try {
                 const ids = JSON.parse(state.val);
                 if (ids && ids.length) {
-                    await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/videos/delete`, { ids });
+                    await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/media/delete`, { media_list: ids });
                     this.log.info(`Videos geloescht: ${ids.join(', ')}`);
                     // Liste neu laden
-                    const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/videos/changed?page=1`);
-                    const videos = (data.videos || []).map(v => ({
+                    const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/media/changed?since=${encodeURIComponent('1970-01-01T00:00:00.000Z')}&page=1`);
+                    const videos = (data.media || []).filter(v => v.type === 'video').map(v => ({
                         id:         v.id,
                         cameraName: v.camera_name || v.device_name || '',
                         networkId:  v.network_id,
@@ -578,8 +580,9 @@ class BlinkAdapter extends utils.Adapter {
         } else if (obj.command === 'getVideos') {
             try {
                 const page = (obj.message && obj.message.page) || 1;
-                const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/videos/changed?page=${page}`);
-                const videos = (data.videos || []).map(v => ({
+                const since = (obj.message && obj.message.since) || '1970-01-01T00:00:00.000Z';
+                const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/media/changed?since=${encodeURIComponent(since)}&page=${page}`);
+                const videos = (data.media || []).filter(v => v.type === 'video').map(v => ({
                     id:        v.id,
                     cameraId:  v.device_id || v.camera_id,
                     cameraName: v.camera_name || v.device_name || '',
@@ -599,7 +602,7 @@ class BlinkAdapter extends utils.Adapter {
             try {
                 const ids = obj.message && obj.message.ids;
                 if (!ids || !ids.length) { this.sendTo(obj.from, obj.command, { success: false, error: 'Keine IDs' }, obj.callback); return; }
-                await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/videos/delete`, { ids });
+                await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/media/delete`, { media_list: ids });
                 this.log.info(`Videos geloescht: ${ids.join(', ')}`);
                 this.sendTo(obj.from, obj.command, { success: true }, obj.callback);
             } catch (err) {
@@ -624,7 +627,15 @@ class BlinkAdapter extends utils.Adapter {
         try {
             const fetchUrl = /\.(jpg|jpeg|png)$/i.test(url) ? url : url + '.jpg';
             const resp = await this.apiSession.get(fetchUrl, { responseType: 'arraybuffer', headers: { 'Authorization': `Bearer ${this.authData.accessToken}` } });
-            return `data:${resp.headers['content-type']||'image/jpeg'};base64,${Buffer.from(resp.data).toString('base64')}`;
+            // Bild komprimieren mit sharp falls verfügbar, sonst direkt zurückgeben
+            try {
+                const sharp = require('sharp');
+                const compressed = await sharp(resp.data).resize(320, null, { withoutEnlargement: true }).jpeg({ quality: 60 }).toBuffer();
+                return `data:image/jpeg;base64,${compressed.toString('base64')}`;
+            } catch (_) {
+                // sharp nicht verfügbar - Original zurückgeben
+                return `data:${resp.headers['content-type']||'image/jpeg'};base64,${Buffer.from(resp.data).toString('base64')}`;
+            }
         } catch (_) { return null; }
     }
 
