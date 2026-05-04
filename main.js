@@ -520,6 +520,37 @@ class BlinkAdapter extends utils.Adapter {
             this.sendTo(obj.from, obj.command, { queued: true }, obj.callback);
         } else if (obj.command === 'getStatus') {
             this.sendTo(obj.from, obj.command, { connected: !!this.authData }, obj.callback);
+        } else if (obj.command === 'getVideos') {
+            try {
+                const page = (obj.message && obj.message.page) || 1;
+                const data = await this.blinkRequest('get', `/api/v1/accounts/${this.authData.accountId}/videos/changed?page=${page}`);
+                const videos = (data.videos || []).map(v => ({
+                    id:        v.id,
+                    cameraId:  v.device_id || v.camera_id,
+                    cameraName: v.camera_name || v.device_name || '',
+                    networkId: v.network_id,
+                    createdAt: v.created_at,
+                    address:   v.address ? (v.address.startsWith('http') ? v.address : `${this.authData.host}${v.address}`) : '',
+                    thumbnail: v.thumbnail ? (v.thumbnail.startsWith('http') ? v.thumbnail : `${this.authData.host}${v.thumbnail}`) : '',
+                    viewed:    !!v.viewed,
+                    size:      v.size || 0,
+                }));
+                this.sendTo(obj.from, obj.command, { videos, total: data.limit || videos.length }, obj.callback);
+            } catch (err) {
+                this.log.warn(`Videos abrufen Fehler: ${err.message}`);
+                this.sendTo(obj.from, obj.command, { videos: [], error: err.message }, obj.callback);
+            }
+        } else if (obj.command === 'deleteVideos') {
+            try {
+                const ids = obj.message && obj.message.ids;
+                if (!ids || !ids.length) { this.sendTo(obj.from, obj.command, { success: false, error: 'Keine IDs' }, obj.callback); return; }
+                await this.blinkRequest('post', `/api/v1/accounts/${this.authData.accountId}/videos/delete`, { ids });
+                this.log.info(`Videos geloescht: ${ids.join(', ')}`);
+                this.sendTo(obj.from, obj.command, { success: true }, obj.callback);
+            } catch (err) {
+                this.log.warn(`Videos loeschen Fehler: ${err.message}`);
+                this.sendTo(obj.from, obj.command, { success: false, error: err.message }, obj.callback);
+            }
         }
     }
 
@@ -527,7 +558,10 @@ class BlinkAdapter extends utils.Adapter {
         if (!this.authData) throw new Error('Nicht authentifiziert');
         const url = `${this.authData.host}${endpoint}`;
         const headers = { 'Authorization': `Bearer ${this.authData.accessToken}`, 'Content-Type': 'application/json' };
-        const resp = method === 'get' ? await this.apiSession.get(url, { headers }) : await this.apiSession.post(url, body||{}, { headers });
+        let resp;
+        if (method === 'get')    resp = await this.apiSession.get(url, { headers });
+        else if (method === 'delete') resp = await this.apiSession.delete(url, { headers, data: body||{} });
+        else                     resp = await this.apiSession.post(url, body||{}, { headers });
         return resp.data;
     }
 
