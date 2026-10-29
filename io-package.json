@@ -1,7 +1,7 @@
 {
   "common": {
     "name": "blink",
-    "version": "0.0.7",
+    "version": "0.0.8",
     "titleLang": {
       "en": "Blink", "de": "Blink", "ru": "Blink", "pt": "Blink",
       "nl": "Blink", "fr": "Blink", "it": "Blink", "es": "Blink",
@@ -35,6 +35,10 @@
     "dependencies": [{ "js-controller": ">=5.0.19" }],
     "globalDependencies": [{ "admin": ">=6.13.16" }],
     "news": {
+      "0.0.8": {
+        "en": "Arm/disarm: state is read back again after 5 and 15 s, newer Blink API path as fallback, a failed command resets armed at once.",
+        "de": "Scharf/unscharf: Zustand wird nach 5 und 15 s erneut gelesen, neuerer Blink-API-Pfad als Rueckfall, ein fehlgeschlagener Befehl setzt armed sofort zurueck."
+      },
       "0.0.7": {
         "en": "PIN-based 2FA via adapter settings instead of script.",
         "de": "PIN-basierte 2FA ueber Adapter-Einstellungen statt Skript."

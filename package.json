@@ -1,6 +1,6 @@
 {
   "name": "iobroker.blink",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "ioBroker adapter for Blink cameras - live snapshots, motion detection and arm/disarm support",
   "author": { "name": "Sven-83" },
   "homepage": "https://github.com/Sven-83/ioBroker.blink",
@@ -35,6 +35,6 @@
   "main": "main.js",
   "scripts": {
     "start": "node main.js",
-    "test": "mocha test/package.js --timeout 10000"
+    "test": "mocha test/package.js test/arm.js --timeout 10000"
   }
 }
