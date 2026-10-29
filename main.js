@@ -36,6 +36,17 @@ function generateHardwareId() {
     return crypto.randomUUID().toUpperCase();
 }
 
+// Blink setzt "armed" erst einige Sekunden nach dem Befehl: Status danach noch zweimal neu lesen
+const ARM_READBACK_MS = [5000, 15000];
+
+// Arm/Disarm: bisheriger Pfad zuerst, der neuere Pfad der Blink-App nur, wenn der alte nicht (mehr) existiert
+function armPaths(accountId, networkId, action) {
+    return [
+        `/network/${networkId}/${action}`,
+        `/api/v1/accounts/${accountId}/networks/${networkId}/state/${action}`,
+    ];
+}
+
 function createOAuthSession() {
     const jar = new CookieJar();
     return wrapper(axios.create({ timeout: 15000, jar, withCredentials: true }));
@@ -47,6 +58,7 @@ class BlinkAdapter extends utils.Adapter {
         this.authData          = null;
         this.pollingTimer      = null;
         this.weeklyTimer       = null;
+        this.armReadbackTimers = [];
         this.snapshotRunning   = false;
         this.thumbnailUrlCache = {};
         this.lastVideoCache    = {};
@@ -103,6 +115,7 @@ class BlinkAdapter extends utils.Adapter {
         try {
             if (this.pollingTimer) clearInterval(this.pollingTimer);
             if (this.weeklyTimer)  clearTimeout(this.weeklyTimer);
+            this.armReadbackTimers.forEach(t => clearTimeout(t));
             if (this._proxyServer) this._proxyServer.close();
         } catch (_) {}
         callback();
@@ -505,17 +518,30 @@ class BlinkAdapter extends utils.Adapter {
         } catch (err) { this.log.warn(`Snapshot Fehler ${name||cameraId}: ${err.message}`); }
     }
 
-    async armNetwork(networkId) {
-        try {
-            await this.blinkRequest('post', `/network/${networkId}/arm`);
-            this.log.info(`Netzwerk ${networkId} scharf.`);
-        } catch (err) { this.log.warn(`Arm Fehler ${networkId}: ${err.message}`); }
+    // true = Blink hat den Befehl angenommen
+    async setNetworkArmed(networkId, arm) {
+        const action = arm ? 'arm' : 'disarm';
+        let lastErr = null;
+        for (const p of armPaths(this.authData && this.authData.accountId, networkId, action)) {
+            try {
+                await this.blinkRequest('post', p);
+                this.log.info(`Netzwerk ${networkId} ${arm ? 'scharf' : 'unscharf'}.`);
+                return true;
+            } catch (err) {
+                lastErr = err;
+                const status = err.response && err.response.status;
+                if (![404, 405, 410].includes(status)) break; // nur ein unbekannter Pfad probiert den naechsten
+                this.log.debug(`${action} ueber ${p} nicht verfuegbar (${status}), versuche naechsten Pfad`);
+            }
+        }
+        this.log.warn(`${arm ? 'Arm' : 'Disarm'} Fehler ${networkId}: ${lastErr ? lastErr.message : 'unbekannt'}`);
+        return false;
     }
-    async disarmNetwork(networkId) {
-        try {
-            await this.blinkRequest('post', `/network/${networkId}/disarm`);
-            this.log.info(`Netzwerk ${networkId} unscharf.`);
-        } catch (err) { this.log.warn(`Disarm Fehler ${networkId}: ${err.message}`); }
+
+    // mehrere Befehle kurz nacheinander (z. B. alle Netzwerke) teilen sich ein Zuruecklesen
+    scheduleArmReadback() {
+        this.armReadbackTimers.forEach(t => clearTimeout(t));
+        this.armReadbackTimers = ARM_READBACK_MS.map(ms => setTimeout(() => this.fetchAllData(), ms));
     }
 
     async onStateChange(id, state) {
@@ -587,8 +613,14 @@ class BlinkAdapter extends utils.Adapter {
             }
         } else {
             const action = parts[2];
-            if ((action === 'arm' && state.val) || (action === 'armed' && state.val === true)) { await this.armNetwork(networkId); await this.fetchAllData(); }
-            else if ((action === 'disarm' && state.val) || (action === 'armed' && state.val === false)) { await this.disarmNetwork(networkId); await this.fetchAllData(); }
+            const arm    = (action === 'arm' && state.val) || (action === 'armed' && state.val === true);
+            const disarm = (action === 'disarm' && state.val) || (action === 'armed' && state.val === false);
+            if (arm || disarm) {
+                const ok = await this.setNetworkArmed(networkId, !!arm);
+                // sofort lesen: bei einem Fehler springt "armed" damit auf den echten Zustand zurueck
+                await this.fetchAllData();
+                if (ok) this.scheduleArmReadback();
+            }
         }
     }
 
@@ -681,5 +713,10 @@ class BlinkAdapter extends utils.Adapter {
     sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 }
 
-if (require.main !== module) { module.exports = (options) => new BlinkAdapter(options); }
+if (require.main !== module) {
+    module.exports = (options) => new BlinkAdapter(options);
+    module.exports.BlinkAdapter = BlinkAdapter; // fuer die Unit-Tests
+    module.exports.armPaths = armPaths;
+    module.exports.ARM_READBACK_MS = ARM_READBACK_MS;
+}
 else { new BlinkAdapter(); }

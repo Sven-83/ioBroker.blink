@@ -78,6 +78,12 @@ Then access at: `http://RASPBERRY-IP:8082/blink-dashboard.html`
 
 ## Changelog
 
+### 0.0.8 (2026-10-29)
+- Arm/disarm: the state is read back again 5 and 15 s after the command (Blink sets it with a delay)
+- Arm/disarm: if the known API path is gone (404/405/410), the newer path of the Blink app is used
+- A failed arm/disarm resets `armed` to the real state at once
+- Fixed path of the package tests, new unit tests for arm/disarm
+
 ### 0.1.0 (2026-04-26)
 - Initial release with OAuth2 PKCE login
 - Live snapshots on motion, manual trigger, weekly schedule
