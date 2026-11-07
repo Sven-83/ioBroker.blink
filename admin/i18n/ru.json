@@ -1,9 +1,14 @@
 {
-  "Email address": "Адрес электронной почты",
-  "Password": "Пароль",
-  "Polling interval (seconds)": "Интервал опроса (секунды)",
-  "Blink Account": "Аккаунт Blink",
-  "Polling": "Опрос",
-  "2FA Information": "Информация о 2FA",
-  "If Blink requires two-factor authentication, the adapter will log a warning. Send the SMS PIN via ioBroker script: sendTo('blink.0', 'verifyPin', {pin: '123456'})": "Если Blink требует двухфакторную аутентификацию, адаптер запишет предупреждение. Отправьте PIN из SMS через скрипт ioBroker: sendTo('blink.0', 'verifyPin', {pin: '123456'})"
+    "2FA code": "Код 2FA",
+    "Blink account": "Аккаунт Blink",
+    "blink adapter settings": "Настройки адаптера blink",
+    "E-mail address": "Адрес электронной почты",
+    "Only needed when Blink sends a code by SMS or e-mail. Enter it here and save; it is used once and then deleted.": "Нужен только если Blink присылает код по SMS или почте. Введите его здесь и сохраните; он используется один раз и затем удаляется.",
+    "Password": "Пароль",
+    "Please enter the e-mail address": "Введите адрес электронной почты",
+    "Please enter the password": "Введите пароль",
+    "Polling": "Опрос",
+    "Polling interval": "Интервал опроса",
+    "Seconds, minimum 30": "Секунды, минимум 30",
+    "Two-factor authentication": "Двухфакторная аутентификация"
 }

@@ -1,11 +1,27 @@
-node_modules/
-.npm/
-*.log
-npm-debug.log*
-.DS_Store
+# No dot-directories except github/vscode
+.*/
+!.vscode/
+!.github/
+
+*.code-workspace
+node_modules
+nbproject
+
+# npm package files
+iobroker.*.tgz
+
 Thumbs.db
-build/
-dist/
-*.tgz
-.nyc_output/
+.commitinfo
+
+# i18n intermediate files
+admin/i18n/flat.txt
+admin/i18n/*/flat.txt
+# logs and local secrets
+*.log
+.env
+
+# widget build intermediate (result goes to widgets/)
+src-widgets/build/
+
+# coverage report (npm run coverage)
 coverage/

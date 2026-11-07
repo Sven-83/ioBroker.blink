@@ -1,0 +1,7 @@
+{
+    "all": true,
+    "src": ["src"],
+    "include": ["src/**/*.ts"],
+    "exclude": ["src/**/*.test.ts", "src/**/*.d.ts", "src/lib/api/types.ts"],
+    "reporter": ["text-summary", "text"]
+}

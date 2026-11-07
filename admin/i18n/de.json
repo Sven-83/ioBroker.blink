@@ -1,9 +1,14 @@
 {
-  "Email address": "E-Mail-Adresse",
-  "Password": "Passwort",
-  "Polling interval (seconds)": "Abfrageintervall (Sekunden)",
-  "Blink Account": "Blink-Konto",
-  "Polling": "Polling",
-  "2FA Information": "2FA-Information",
-  "If Blink requires two-factor authentication, the adapter will log a warning. Send the SMS PIN via ioBroker script: sendTo('blink.0', 'verifyPin', {pin: '123456'})": "Wenn Blink Zwei-Faktor-Authentifizierung erfordert, wird der Adapter eine Warnung ausgeben. Sende den SMS-PIN per ioBroker-Skript: sendTo('blink.0', 'verifyPin', {pin: '123456'})"
+    "2FA code": "2FA-Code",
+    "Blink account": "Blink-Konto",
+    "blink adapter settings": "Adaptereinstellungen für blink",
+    "E-mail address": "E-Mail-Adresse",
+    "Only needed when Blink sends a code by SMS or e-mail. Enter it here and save; it is used once and then deleted.": "Nur nötig, wenn Blink einen Code per SMS oder E-Mail schickt. Hier eintragen und speichern; er wird einmal verwendet und danach gelöscht.",
+    "Password": "Passwort",
+    "Please enter the e-mail address": "Bitte die E-Mail-Adresse eingeben",
+    "Please enter the password": "Bitte das Passwort eingeben",
+    "Polling": "Abfrage",
+    "Polling interval": "Abfrageintervall",
+    "Seconds, minimum 30": "Sekunden, mindestens 30",
+    "Two-factor authentication": "Zwei-Faktor-Authentifizierung"
 }

@@ -1,0 +1,14 @@
+{
+    "2FA code": "2FA-code",
+    "Blink account": "Blink-account",
+    "blink adapter settings": "Adapterinstellingen voor blink",
+    "E-mail address": "E-mailadres",
+    "Only needed when Blink sends a code by SMS or e-mail. Enter it here and save; it is used once and then deleted.": "Alleen nodig als Blink een code per sms of e-mail stuurt. Voer hem hier in en sla op; hij wordt één keer gebruikt en daarna gewist.",
+    "Password": "Wachtwoord",
+    "Please enter the e-mail address": "Voer het e-mailadres in",
+    "Please enter the password": "Voer het wachtwoord in",
+    "Polling": "Opvragen",
+    "Polling interval": "Opvraaginterval",
+    "Seconds, minimum 30": "Seconden, minimaal 30",
+    "Two-factor authentication": "Tweestapsverificatie"
+}

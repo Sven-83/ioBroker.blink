@@ -1,52 +1,72 @@
 {
-  "type": "panel",
-  "items": {
-    "_authHeader": {
-      "type": "header",
-      "text": "Blink Account",
-      "size": 3
-    },
-    "email": {
-      "type": "text",
-      "label": "Email address",
-      "sm": 12,
-      "md": 6
-    },
-    "password": {
-      "type": "password",
-      "label": "Password",
-      "sm": 12,
-      "md": 6
-    },
-    "_2faHeader": {
-      "type": "header",
-      "text": "2FA - Two-Factor Authentication",
-      "size": 3
-    },
-    "_2faInfo": {
-      "type": "staticText",
-      "text": "If Blink requires 2FA, you will receive an SMS PIN. Enter the 6-digit PIN below and SAVE settings. The adapter will use the PIN automatically.",
-      "sm": 12
-    },
-    "pin": {
-      "type": "text",
-      "label": "2FA PIN (only when SMS received)",
-      "sm": 12,
-      "md": 6
-    },
-    "_pollHeader": {
-      "type": "header",
-      "text": "Polling",
-      "size": 3
-    },
-    "pollingInterval": {
-      "type": "number",
-      "label": "Polling interval (seconds)",
-      "min": 10,
-      "max": 3600,
-      "default": 30,
-      "sm": 12,
-      "md": 6
+    "i18n": true,
+    "type": "panel",
+    "items": {
+        "_headerAccount": {
+            "type": "header",
+            "text": "Blink account",
+            "size": 2
+        },
+        "email": {
+            "type": "text",
+            "label": "E-mail address",
+            "validator": "/^[^ @]+@[^ @]+[.][^ @]+$/.test((data.email || '').trim())",
+            "validatorErrorText": "Please enter the e-mail address",
+            "validatorNoSaveOnError": true,
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "password": {
+            "type": "password",
+            "label": "Password",
+            "validator": "!!data.password",
+            "validatorErrorText": "Please enter the password",
+            "validatorNoSaveOnError": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "_header2fa": {
+            "type": "header",
+            "text": "Two-factor authentication",
+            "size": 2,
+            "newLine": true
+        },
+        "pin": {
+            "type": "text",
+            "label": "2FA code",
+            "help": "Only needed when Blink sends a code by SMS or e-mail. Enter it here and save; it is used once and then deleted.",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "_headerPolling": {
+            "type": "header",
+            "text": "Polling",
+            "size": 2,
+            "newLine": true
+        },
+        "pollInterval": {
+            "type": "number",
+            "label": "Polling interval",
+            "help": "Seconds, minimum 30",
+            "min": 30,
+            "max": 3600,
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        }
     }
-  }
 }

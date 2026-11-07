@@ -1,0 +1,14 @@
+{
+    "2FA code": "Код 2FA",
+    "Blink account": "Обліковий запис Blink",
+    "blink adapter settings": "Налаштування адаптера blink",
+    "E-mail address": "Адреса електронної пошти",
+    "Only needed when Blink sends a code by SMS or e-mail. Enter it here and save; it is used once and then deleted.": "Потрібен лише, якщо Blink надсилає код SMS або поштою. Введіть його тут і збережіть; він використовується один раз і потім видаляється.",
+    "Password": "Пароль",
+    "Please enter the e-mail address": "Введіть адресу електронної пошти",
+    "Please enter the password": "Введіть пароль",
+    "Polling": "Опитування",
+    "Polling interval": "Інтервал опитування",
+    "Seconds, minimum 30": "Секунди, мінімум 30",
+    "Two-factor authentication": "Двофакторна автентифікація"
+}

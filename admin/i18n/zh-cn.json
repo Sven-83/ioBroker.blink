@@ -1,0 +1,14 @@
+{
+    "2FA code": "2FA 验证码",
+    "Blink account": "Blink 账户",
+    "blink adapter settings": "blink 适配器设置",
+    "E-mail address": "电子邮件地址",
+    "Only needed when Blink sends a code by SMS or e-mail. Enter it here and save; it is used once and then deleted.": "仅当 Blink 通过短信或电子邮件发送验证码时需要。在此输入并保存；使用一次后即删除。",
+    "Password": "密码",
+    "Please enter the e-mail address": "请输入电子邮件地址",
+    "Please enter the password": "请输入密码",
+    "Polling": "轮询",
+    "Polling interval": "轮询间隔",
+    "Seconds, minimum 30": "秒，最少 30",
+    "Two-factor authentication": "双重身份验证"
+}

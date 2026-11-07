@@ -1,69 +1,123 @@
 {
-  "common": {
-    "name": "blink",
-    "version": "0.0.7",
-    "titleLang": {
-      "en": "Blink", "de": "Blink", "ru": "Blink", "pt": "Blink",
-      "nl": "Blink", "fr": "Blink", "it": "Blink", "es": "Blink",
-      "pl": "Blink", "uk": "Blink", "zh-cn": "Blink"
+    "common": {
+        "name": "blink",
+        "version": "0.1.0",
+        "news": {
+            "0.1.0": {
+                "en": "complete rewrite in TypeScript (work in progress): new object structure, no open proxy any more",
+                "de": "komplette Neufassung in TypeScript (in Arbeit): neue Objektstruktur, kein offener Proxy mehr",
+                "ru": "полная переработка на TypeScript (в работе): новая структура объектов, открытого прокси больше нет",
+                "pt": "reescrita completa em TypeScript (em curso): nova estrutura de objetos, sem proxy aberto",
+                "nl": "volledige herschrijving in TypeScript (in uitvoering): nieuwe objectstructuur, geen open proxy meer",
+                "fr": "réécriture complète en TypeScript (en cours) : nouvelle structure d'objets, plus de proxy ouvert",
+                "it": "riscrittura completa in TypeScript (in corso): nuova struttura degli oggetti, nessun proxy aperto",
+                "es": "reescritura completa en TypeScript (en curso): nueva estructura de objetos, sin proxy abierto",
+                "pl": "całkowite przepisanie w TypeScript (w toku): nowa struktura obiektów, brak otwartego proxy",
+                "uk": "повне переписування на TypeScript (у роботі): нова структура об’єктів, відкритого проксі більше немає",
+                "zh-cn": "使用 TypeScript 完全重写（进行中）：新的对象结构，不再有开放代理"
+            }
+        },
+        "titleLang": {
+            "en": "Blink",
+            "de": "Blink",
+            "ru": "Blink",
+            "pt": "Blink",
+            "nl": "Blink",
+            "fr": "Blink",
+            "it": "Blink",
+            "es": "Blink",
+            "pl": "Blink",
+            "uk": "Blink",
+            "zh-cn": "Blink"
+        },
+        "desc": {
+            "en": "Blink cameras: arm/disarm with readback, snapshots and live view",
+            "de": "Blink-Kameras: Scharf/Unscharf mit Rückmeldung, Snapshots und Livebild",
+            "ru": "Камеры Blink: постановка на охрану с проверкой, снимки и живое видео",
+            "pt": "Câmaras Blink: armar/desarmar com confirmação, instantâneos e vídeo ao vivo",
+            "nl": "Blink-camera's: in-/uitschakelen met terugmelding, snapshots en livebeeld",
+            "fr": "Caméras Blink : armement/désarmement avec confirmation, instantanés et vidéo en direct",
+            "it": "Telecamere Blink: inserimento/disinserimento con conferma, istantanee e video live",
+            "es": "Cámaras Blink: armar/desarmar con confirmación, instantáneas y vídeo en directo",
+            "pl": "Kamery Blink: uzbrajanie/rozbrajanie z potwierdzeniem, zdjęcia i podgląd na żywo",
+            "uk": "Камери Blink: постановка на охорону з перевіркою, знімки та живе відео",
+            "zh-cn": "Blink 摄像头：布防/撤防并回读状态、快照和实时画面"
+        },
+        "authors": [
+            "Sven-83 <276080681+Sven-83@users.noreply.github.com>"
+        ],
+        "keywords": [
+            "blink",
+            "camera",
+            "security",
+            "alarm",
+            "snapshot"
+        ],
+        "licenseInformation": {
+            "type": "free",
+            "license": "MIT"
+        },
+        "platform": "Javascript/Node.js",
+        "icon": "blink.png",
+        "enabled": true,
+        "extIcon": "https://raw.githubusercontent.com/Sven-83/ioBroker.blink/main/admin/blink.png",
+        "readme": "https://github.com/Sven-83/ioBroker.blink/blob/main/README.md",
+        "loglevel": "info",
+        "tier": 3,
+        "mode": "daemon",
+        "type": "alarm",
+        "compact": true,
+        "connectionType": "cloud",
+        "dataSource": "poll",
+        "messagebox": true,
+        "adminUI": {
+            "config": "json"
+        },
+        "dependencies": [
+            {
+                "js-controller": ">=6.0.11"
+            }
+        ],
+        "globalDependencies": [
+            {
+                "admin": ">=7.6.20"
+            }
+        ]
     },
-    "desc": {
-      "en": "Integrate Amazon Blink cameras and security networks.",
-      "de": "Amazon Blink Kameras und Sicherheitssysteme integrieren."
+    "native": {
+        "email": "",
+        "password": "",
+        "pin": "",
+        "pollInterval": 60
     },
-    "authors": ["Sven-83"],
-    "keywords": ["blink", "camera", "security", "amazon", "alarm", "smart-home"],
-    "licenseInformation": {
-      "type": "free",
-      "license": "MIT",
-      "link": "https://github.com/Sven-83/ioBroker.blink/blob/main/LICENSE"
-    },
-    "mode": "daemon",
-    "type": "alarm",
-    "connectionType": "cloud",
-    "dataSource": "poll",
-    "compact": true,
-    "messagebox": true,
-    "adminUI": { "config": "json" },
-    "icon": "admin/blink.png",
-    "extIcon": "https://raw.githubusercontent.com/Sven-83/ioBroker.blink/main/admin/blink.png",
-    "readme": "https://github.com/Sven-83/ioBroker.blink/blob/main/README.md",
-    "loglevel": "info",
-    "tier": 2,
-    "encryptedNative": ["accessToken", "refreshToken", "password", "pin", "pendingCookies"],
-    "protectedNative": ["accessToken", "refreshToken", "password", "pin", "pendingCookies"],
-    "dependencies": [{ "js-controller": ">=5.0.19" }],
-    "globalDependencies": [{ "admin": ">=6.13.16" }],
-    "news": {
-      "0.0.7": {
-        "en": "PIN-based 2FA via adapter settings instead of script.",
-        "de": "PIN-basierte 2FA ueber Adapter-Einstellungen statt Skript."
-      }
-    }
-  },
-  "native": {
-    "email": "",
-    "password": "",
-    "pin": "",
-    "accessToken": "",
-    "refreshToken": "",
-    "hardwareId": "",
-    "accountId": "",
-    "host": "",
-    "pollingInterval": 30,
-    "pendingCsrf": "",
-    "pendingVerifier": "",
-    "pendingHwId": "",
-    "pendingCookies": ""
-  },
-  "objects": [],
-  "instanceObjects": [
-    { "_id": "info", "type": "channel", "common": { "name": "Information" }, "native": {} },
-    {
-      "_id": "info.connection",
-      "type": "state",
-      "common": { "name": "Connected", "type": "boolean", "role": "indicator.connected", "read": true, "write": false, "def": false },
-      "native": {}
-    }
-  ]
+    "encryptedNative": [
+        "password"
+    ],
+    "protectedNative": [
+        "password"
+    ],
+    "objects": [],
+    "instanceObjects": [
+        {
+            "_id": "info",
+            "type": "channel",
+            "common": {
+                "name": "Information"
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.connection",
+            "type": "state",
+            "common": {
+                "role": "indicator.connected",
+                "name": "Connected to the Blink cloud",
+                "type": "boolean",
+                "read": true,
+                "write": false,
+                "def": false
+            },
+            "native": {}
+        }
+    ]
 }

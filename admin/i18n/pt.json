@@ -1,0 +1,14 @@
+{
+    "2FA code": "Código 2FA",
+    "Blink account": "Conta Blink",
+    "blink adapter settings": "Configurações do adaptador blink",
+    "E-mail address": "Endereço de e-mail",
+    "Only needed when Blink sends a code by SMS or e-mail. Enter it here and save; it is used once and then deleted.": "Só é necessário quando a Blink envia um código por SMS ou e-mail. Introduza-o aqui e guarde; é usado uma vez e depois apagado.",
+    "Password": "Palavra-passe",
+    "Please enter the e-mail address": "Introduza o endereço de e-mail",
+    "Please enter the password": "Introduza a palavra-passe",
+    "Polling": "Consulta",
+    "Polling interval": "Intervalo de consulta",
+    "Seconds, minimum 30": "Segundos, mínimo 30",
+    "Two-factor authentication": "Autenticação de dois fatores"
+}
