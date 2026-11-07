@@ -21,9 +21,11 @@ __export(config_exports, {
   POLL_DEFAULT_S: () => POLL_DEFAULT_S,
   POLL_MAX_S: () => POLL_MAX_S,
   POLL_MIN_S: () => POLL_MIN_S,
+  TEST_ORIGIN_ENV: () => TEST_ORIGIN_ENV,
   normalizeEmail: () => normalizeEmail,
   normalizePin: () => normalizePin,
-  pollIntervalSeconds: () => pollIntervalSeconds
+  pollIntervalSeconds: () => pollIntervalSeconds,
+  testOrigin: () => testOrigin
 });
 module.exports = __toCommonJS(config_exports);
 const POLL_DEFAULT_S = 60;
@@ -44,13 +46,19 @@ function normalizePin(value) {
   const pin = typeof value === "string" ? value.replace(/\s+/g, "") : "";
   return /^\d{4,8}$/.test(pin) ? pin : void 0;
 }
+const TEST_ORIGIN_ENV = "BLINK_TEST_ORIGIN";
+function testOrigin(value) {
+  return value && /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(value) ? value : void 0;
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   POLL_DEFAULT_S,
   POLL_MAX_S,
   POLL_MIN_S,
+  TEST_ORIGIN_ENV,
   normalizeEmail,
   normalizePin,
-  pollIntervalSeconds
+  pollIntervalSeconds,
+  testOrigin
 });
 //# sourceMappingURL=config.js.map

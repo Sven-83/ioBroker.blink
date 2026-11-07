@@ -1,0 +1,184 @@
+/*
+ * Small HTTP layer on top of the global fetch: timeout, manual redirects, cookie jar, test origin.
+ */
+
+import { REQUEST_TIMEOUT_MS } from './constants';
+import { AbortedError } from './errors';
+
+/** Response with the body already read as text */
+export interface HttpResponse {
+    /** HTTP status */
+    status: number;
+    /** Response headers */
+    headers: Headers;
+    /** Body as text */
+    body: string;
+    /** Location header, if any */
+    location: string | undefined;
+}
+
+/** Request options */
+export interface HttpRequest {
+    /** Default GET */
+    method?: 'GET' | 'POST';
+    /** Extra request headers */
+    headers?: Record<string, string>;
+    /** Form fields (sent as application/x-www-form-urlencoded) */
+    form?: Record<string, string>;
+    /** JSON body */
+    json?: unknown;
+    /** Cookies of the OAuth flow, read and updated */
+    cookies?: CookieJar;
+}
+
+/** Minimal cookie jar for the OAuth host (name -> value, no domain/path handling needed) */
+export class CookieJar {
+    private readonly cookies = new Map<string, string>();
+
+    /**
+     * @param entries - Cookies to start with (restored pending login)
+     */
+    public constructor(entries: Record<string, string> = {}) {
+        for (const [name, value] of Object.entries(entries)) {
+            this.cookies.set(name, value);
+        }
+    }
+
+    /**
+     * Stores the cookies of a response.
+     *
+     * @param headers - Response headers
+     */
+    public update(headers: Headers): void {
+        for (const line of headers.getSetCookie()) {
+            const pair = line.split(';', 1)[0];
+            const eq = pair.indexOf('=');
+            if (eq > 0) {
+                this.cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+            }
+        }
+    }
+
+    /** Value of the Cookie request header, empty if there are no cookies */
+    public header(): string {
+        return [...this.cookies].map(([name, value]) => `${name}=${value}`).join('; ');
+    }
+
+    /** Plain object for storing a pending login */
+    public toJSON(): Record<string, string> {
+        return Object.fromEntries(this.cookies);
+    }
+}
+
+/** HTTP client options */
+export interface HttpClientOptions {
+    /** Replaces the origin of every request (integration tests: http://127.0.0.1:port) */
+    testOrigin?: string;
+    /** Timeout per request */
+    timeoutMs?: number;
+    /** Aborts all requests when the adapter unloads */
+    signal?: AbortSignal;
+}
+
+/** Thin fetch wrapper used by the OAuth flow and the REST client */
+export class HttpClient {
+    private readonly testOrigin: string | undefined;
+    private readonly timeoutMs: number;
+    private readonly signal: AbortSignal | undefined;
+
+    /**
+     * @param options - Client options
+     */
+    public constructor(options: HttpClientOptions = {}) {
+        this.testOrigin = options.testOrigin;
+        this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+        this.signal = options.signal;
+    }
+
+    /**
+     * URL as it is really requested (with the test origin, if set).
+     *
+     * @param url - Absolute https URL of the Blink cloud
+     */
+    public resolve(url: string): string {
+        if (!this.testOrigin) {
+            return url;
+        }
+        const parsed = new URL(url);
+        return `${this.testOrigin}${parsed.pathname}${parsed.search}`;
+    }
+
+    /**
+     * Sends a request without following redirects.
+     *
+     * @param url - Absolute https URL of the Blink cloud
+     * @param request - Method, headers, body and cookie jar
+     */
+    public async request(url: string, request: HttpRequest = {}): Promise<HttpResponse> {
+        if (this.signal?.aborted) {
+            throw new AbortedError();
+        }
+        const headers: Record<string, string> = { 'Accept-Language': 'en-US,en;q=0.9', ...request.headers };
+        let body: string | undefined;
+        if (request.form) {
+            body = new URLSearchParams(request.form).toString();
+            headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        } else if (request.json !== undefined) {
+            body = JSON.stringify(request.json);
+            headers['Content-Type'] = 'application/json';
+        }
+        const cookie = request.cookies?.header();
+        if (cookie) {
+            headers.Cookie = cookie;
+        }
+
+        const timeout = AbortSignal.timeout(this.timeoutMs);
+        const signal = this.signal ? AbortSignal.any([this.signal, timeout]) : timeout;
+        let response: Response;
+        try {
+            response = await fetch(this.resolve(url), {
+                method: request.method ?? 'GET',
+                headers,
+                body,
+                redirect: 'manual',
+                signal,
+            });
+        } catch (err) {
+            if (this.signal?.aborted) {
+                throw new AbortedError();
+            }
+            throw err;
+        }
+        request.cookies?.update(response.headers);
+        const text = await response.text();
+        return {
+            status: response.status,
+            headers: response.headers,
+            body: text,
+            location: response.headers.get('location') ?? undefined,
+        };
+    }
+}
+
+/**
+ * Parses JSON, returns undefined instead of throwing.
+ *
+ * @param text - Response body
+ */
+export function parseJson(text: string): unknown {
+    try {
+        return JSON.parse(text) as unknown;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Reads a property of an unknown JSON value.
+ *
+ * @param value - Parsed JSON
+ * @param key - Property name
+ */
+export function field(value: unknown, key: string): unknown {
+    return value !== null && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined;
+}

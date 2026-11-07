@@ -33,6 +33,19 @@ There are no npm releases; the adapter is installed from the `main` branch.
 | 2FA code | Only when Blink sends a code; it is used once and then deleted |
 | Polling interval | Seconds, 30 to 3600, default 60 |
 
+### Login and 2FA
+1. Enter e-mail address and password and save. The adapter logs in.
+2. If Blink sends a code (SMS or e-mail), `info.loginState` shows `twoFactorRequired`. Within 10 minutes either
+   - enter the code in the settings (2FA code) and save, or
+   - send it from a script: `sendTo('blink.0', 'verifyPin', { pin: '123456' }, res => log(JSON.stringify(res)));`
+3. Restarts do not request a new code while the login is waiting. The session is stored encrypted and renewed automatically.
+
+| State | Meaning |
+|---|---|
+| `info.connection` | Logged in to the Blink cloud |
+| `info.loginState` | `ok`, `connecting`, `twoFactorRequired`, `twoFactorRejected`, `credentialsRejected` (no further attempts until the settings change), `rateLimited`, `error` (retry with backoff), `noConfig` |
+| `auth.*` | Session, pending login and device ID - encrypted, do not edit |
+
 ### Security
 Cameras show private areas. Only make ioBroker admin and web reachable with authentication and HTTPS.
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
@@ -61,6 +74,19 @@ Es gibt keine npm-Releases; installiert wird aus dem Branch `main`.
 | 2FA-Code | Nur wenn Blink einen Code schickt; er wird einmal verwendet und dann gelöscht |
 | Abfrageintervall | Sekunden, 30 bis 3600, Standard 60 |
 
+### Login und 2FA
+1. E-Mail-Adresse und Passwort eintragen und speichern. Der Adapter meldet sich an.
+2. Schickt Blink einen Code (SMS oder E-Mail), zeigt `info.loginState` den Wert `twoFactorRequired`. Innerhalb von 10 Minuten entweder
+   - den Code in den Einstellungen (2FA-Code) eintragen und speichern, oder
+   - ihn aus einem Skript senden: `sendTo('blink.0', 'verifyPin', { pin: '123456' }, res => log(JSON.stringify(res)));`
+3. Neustarts fordern keinen neuen Code an, solange der Login wartet. Die Sitzung wird verschlüsselt gespeichert und automatisch erneuert.
+
+| Datenpunkt | Bedeutung |
+|---|---|
+| `info.connection` | Mit der Blink-Cloud verbunden |
+| `info.loginState` | `ok`, `connecting`, `twoFactorRequired`, `twoFactorRejected`, `credentialsRejected` (keine weiteren Versuche, bis die Einstellungen geändert werden), `rateLimited`, `error` (neuer Versuch mit Backoff), `noConfig` |
+| `auth.*` | Sitzung, wartender Login und Geräte-ID - verschlüsselt, nicht ändern |
+
 ### Sicherheit
 Kameras zeigen private Bereiche. ioBroker-Admin und -Web nur mit Anmeldung und HTTPS erreichbar machen.
 Schwachstellen bitte wie in [SECURITY.md](SECURITY.md) beschrieben melden.
@@ -72,6 +98,7 @@ Schwachstellen bitte wie in [SECURITY.md](SECURITY.md) beschrieben melden.
 -->
 ### 0.1.0 (work in progress)
 - Complete rewrite in TypeScript: new object structure, the open proxy of 0.0.x is gone
+- Login with PKCE and 2FA (settings or sendTo), encrypted session, token refresh, no login loops
 
 ## License
 MIT License

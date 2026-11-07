@@ -118,6 +118,89 @@
                 "def": false
             },
             "native": {}
+        },
+        {
+            "_id": "info.loginState",
+            "type": "state",
+            "common": {
+                "name": "State of the Blink login",
+                "type": "string",
+                "role": "text",
+                "read": true,
+                "write": false,
+                "def": "connecting",
+                "states": {
+                    "ok": "logged in",
+                    "connecting": "connecting",
+                    "twoFactorRequired": "2FA code required",
+                    "twoFactorRejected": "2FA code rejected",
+                    "credentialsRejected": "e-mail or password rejected",
+                    "rateLimited": "waiting (Blink rate limit)",
+                    "error": "error, retrying",
+                    "noConfig": "not configured"
+                }
+            },
+            "native": {}
+        },
+        {
+            "_id": "auth",
+            "type": "channel",
+            "common": {
+                "name": "Login data (encrypted)"
+            },
+            "native": {}
+        },
+        {
+            "_id": "auth.session",
+            "type": "state",
+            "common": {
+                "name": "Session (encrypted)",
+                "type": "string",
+                "role": "json",
+                "read": true,
+                "write": false,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "auth.pending",
+            "type": "state",
+            "common": {
+                "name": "Login waiting for the 2FA code (encrypted)",
+                "type": "string",
+                "role": "json",
+                "read": true,
+                "write": false,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "auth.hardwareId",
+            "type": "state",
+            "common": {
+                "name": "Device ID sent to Blink (encrypted)",
+                "type": "string",
+                "role": "text",
+                "read": true,
+                "write": false,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "auth.retryAt",
+            "type": "state",
+            "common": {
+                "name": "No login attempt before (rate limit)",
+                "type": "number",
+                "role": "value.time",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
         }
     ]
 }

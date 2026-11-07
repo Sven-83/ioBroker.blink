@@ -42,3 +42,16 @@ export function normalizePin(value: unknown): string | undefined {
     const pin = typeof value === 'string' ? value.replace(/\s+/g, '') : '';
     return /^\d{4,8}$/.test(pin) ? pin : undefined;
 }
+
+/** Environment variable that points the client to a local fake cloud (integration test only) */
+export const TEST_ORIGIN_ENV = 'BLINK_TEST_ORIGIN';
+
+/**
+ * Origin for the integration test. Only plain http on the loopback address is accepted,
+ * so the variable can never send credentials or tokens to another host.
+ *
+ * @param value - Value of the environment variable
+ */
+export function testOrigin(value: string | undefined): string | undefined {
+    return value && /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(value) ? value : undefined;
+}
