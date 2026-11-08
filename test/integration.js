@@ -252,6 +252,108 @@ tests.integration(path.join(__dirname, '..'), {
             });
         });
 
+        suite('Polling', getHarness => {
+            let harness;
+            let cloud;
+
+            before(async function () {
+                this.timeout(60_000);
+                harness = getHarness();
+                cloud = await startFakeBlink();
+                await harness.changeAdapterConfig('blink', {
+                    native: { email: cloud.email, password: cloud.password, pin: '', pollInterval: 30 },
+                });
+                await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
+            });
+
+            after(async () => {
+                await cloud?.close();
+            });
+
+            it('builds the object tree with the values from Blink', async function () {
+                this.timeout(20_000);
+                await waitFor(async () => (await stateVal(harness, 'info.connection')) === true, 'connected');
+                expect(await stateVal(harness, 'networks.1001.armed')).to.equal(true);
+                expect(await stateVal(harness, 'syncModules.2001.status')).to.equal('online');
+                expect(await stateVal(harness, 'cameras.3001.kind')).to.equal('camera');
+                expect(await stateVal(harness, 'cameras.3001.temperature')).to.equal(20);
+                expect(await stateVal(harness, 'cameras.3002.kind')).to.equal('mini');
+                expect(await stateVal(harness, 'cameras.3003.kind')).to.equal('doorbell');
+                expect(await stateVal(harness, 'cameras.3003.batteryLow')).to.equal(true);
+                expect(await stateVal(harness, 'cameras.3003.batteryVoltage')).to.equal(1.48);
+                expect(await stateVal(harness, 'info.lastPoll')).to.be.greaterThan(0);
+
+                const object = await harness.objects.getObjectAsync(`${NS}.cameras.3001`);
+                expect(object.type).to.equal('device');
+                expect(object.common.name).to.equal('Test Camera');
+                // a Mini has no battery, so there is no empty state for it
+                expect(await harness.objects.getObjectAsync(`${NS}.cameras.3002.batteryLevel`)).to.equal(null);
+                // armed only becomes writable with the readback of phase 4
+                const armed = await harness.objects.getObjectAsync(`${NS}.networks.1001.armed`);
+                expect(armed.common.write).to.equal(false);
+            });
+
+            it('polls again and renews a rejected token without a new login', async function () {
+                this.timeout(50_000);
+                const before = { ...cloud.stats };
+                cloud.config.homescreen.networks[0].armed = false;
+                cloud.revokeAccessTokens();
+                await waitFor(
+                    async () => (await stateVal(harness, 'networks.1001.armed')) === false,
+                    'next poll',
+                    45_000,
+                );
+                expect(cloud.stats.refresh).to.equal(before.refresh + 1);
+                expect(cloud.stats.signin).to.equal(before.signin);
+                expect(cloud.stats.homescreen, 'exactly one poll per cycle').to.equal(before.homescreen + 1);
+            });
+
+            it('marks a device Blink no longer reports, without deleting it', async function () {
+                this.timeout(30_000);
+                cloud.config.homescreen.owls = [];
+                await restart(harness, { [ENV_KEY]: cloud.origin });
+                await waitFor(
+                    async () => (await stateVal(harness, 'cameras.3002.available')) === false,
+                    'device marked',
+                );
+                expect(await harness.objects.getObjectAsync(`${NS}.cameras.3002`)).to.not.equal(null);
+                expect(await stateVal(harness, 'cameras.3001.available')).to.equal(true);
+            });
+
+            it('keeps the session and backs off when the API fails', async function () {
+                this.timeout(30_000);
+                const before = { ...cloud.stats };
+                cloud.config.homescreenStatus = 500;
+                await restart(harness, { [ENV_KEY]: cloud.origin });
+                await waitFor(async () => (await stateVal(harness, 'info.loginState')) === 'error', 'error state');
+                expect(await stateVal(harness, 'info.connection')).to.equal(false);
+                expect(await stateVal(harness, 'auth.session')).to.not.equal('');
+                expect(harness.hasLog(/HTTP 500.*Next attempt in 60 s/, 'warn')).to.equal(true);
+                expect(cloud.stats.signin).to.equal(before.signin);
+            });
+
+            it('waits for the rate limit, also across a restart', async function () {
+                this.timeout(40_000);
+                cloud.config.homescreenStatus = 429;
+                await restart(harness, { [ENV_KEY]: cloud.origin });
+                await waitFor(
+                    async () => (await stateVal(harness, 'info.loginState')) === 'rateLimited',
+                    'rate limit state',
+                );
+                expect(await stateVal(harness, 'auth.retryAt')).to.be.greaterThan(Date.now());
+
+                const requests = cloud.stats.homescreenRequests;
+                await restart(harness, { [ENV_KEY]: cloud.origin });
+                await waitFor(async () => (await stateVal(harness, 'info.loginState')) === 'rateLimited', 'still waiting');
+                await new Promise(resolve => setTimeout(resolve, 3_000));
+                expect(cloud.stats.homescreenRequests).to.equal(requests);
+            });
+
+            it('keeps password, e-mail address and tokens out of states and log', async () => {
+                await expectNoSecrets(harness, [cloud.email, cloud.password, ...cloud.issuedTokens()]);
+            });
+        });
+
         suite('Wrong password', getHarness => {
             let harness;
             let cloud;

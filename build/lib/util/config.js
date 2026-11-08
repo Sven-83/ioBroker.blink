@@ -19,11 +19,13 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var config_exports = {};
 __export(config_exports, {
   POLL_DEFAULT_S: () => POLL_DEFAULT_S,
+  POLL_JITTER_MS: () => POLL_JITTER_MS,
   POLL_MAX_S: () => POLL_MAX_S,
   POLL_MIN_S: () => POLL_MIN_S,
   TEST_ORIGIN_ENV: () => TEST_ORIGIN_ENV,
   normalizeEmail: () => normalizeEmail,
   normalizePin: () => normalizePin,
+  pollDelayMs: () => pollDelayMs,
   pollIntervalSeconds: () => pollIntervalSeconds,
   testOrigin: () => testOrigin
 });
@@ -37,6 +39,10 @@ function pollIntervalSeconds(value) {
     return POLL_DEFAULT_S;
   }
   return Math.min(Math.max(seconds, POLL_MIN_S), POLL_MAX_S);
+}
+const POLL_JITTER_MS = 5e3;
+function pollDelayMs(seconds, random = Math.random) {
+  return seconds * 1e3 + Math.floor(random() * POLL_JITTER_MS);
 }
 function normalizeEmail(value) {
   const email = typeof value === "string" ? value.trim() : "";
@@ -53,11 +59,13 @@ function testOrigin(value) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   POLL_DEFAULT_S,
+  POLL_JITTER_MS,
   POLL_MAX_S,
   POLL_MIN_S,
   TEST_ORIGIN_ENV,
   normalizeEmail,
   normalizePin,
+  pollDelayMs,
   pollIntervalSeconds,
   testOrigin
 });

@@ -25,22 +25,26 @@ var utils = __toESM(require("@iobroker/adapter-core"));
 var import_errors = require("./lib/api/errors");
 var import_http = require("./lib/api/http");
 var import_oauth = require("./lib/api/oauth");
+var import_rest = require("./lib/api/rest");
 var import_session_store = require("./lib/model/session-store");
+var import_tree = require("./lib/model/tree");
 var import_config = require("./lib/util/config");
 const RETRY_START_S = 60;
 const RETRY_MAX_S = 1800;
 const START_JITTER_MS = 2e3;
 const REFRESH_MARGIN_MS = 5 * 6e4;
-const REFRESH_MIN_DELAY_MS = 6e4;
 class Blink extends utils.Adapter {
   abort = new AbortController();
   oauth;
+  rest;
+  tree;
   session;
   timer;
   retrySeconds = RETRY_START_S;
   email = "";
   pollSeconds = 0;
   connecting = false;
+  cloudConnected = false;
   expiredRetried = false;
   loginState;
   codec = {
@@ -75,12 +79,28 @@ class Blink extends utils.Adapter {
     if (origin) {
       this.log.warn(`Test mode: all requests go to ${origin}`);
     }
-    this.oauth = new import_oauth.OAuthFlow(new import_http.HttpClient({ testOrigin: origin, signal: this.abort.signal }));
+    const http = new import_http.HttpClient({ testOrigin: origin, signal: this.abort.signal });
+    this.oauth = new import_oauth.OAuthFlow(http);
+    this.rest = new import_rest.RestClient(http);
+    this.tree = new import_tree.ObjectTree({
+      writeObject: (id, object) => this.extendObjectAsync(id, object),
+      writeState: (id, value) => this.setState(id, value, true),
+      listDevices: async () => {
+        const prefix = `${this.namespace}.`;
+        const view = await this.getObjectViewAsync("system", "device", {
+          startkey: prefix,
+          endkey: `${prefix}\u9999`
+        });
+        return view.rows.map((row) => row.id.slice(prefix.length));
+      },
+      info: (message) => this.log.info(message)
+    });
     await this.setLoginState("connecting");
     this.schedule(Math.floor(Math.random() * START_JITTER_MS), () => this.connect());
   }
   /**
-   * Runs a single chained timer - retry, refresh and (later) polling never overlap (audit B.11.2).
+   * Runs a single chained timer - retry and polling (which includes the token refresh) never overlap
+   * (audit B.11.2). The next run is only planned when the current one has finished.
    *
    * @param ms - Delay
    * @param task - Task to run
@@ -89,7 +109,11 @@ class Blink extends utils.Adapter {
     this.clearTimeout(this.timer);
     this.timer = this.setTimeout(() => {
       this.timer = void 0;
-      void task();
+      task().catch((err) => {
+        if (!this.abort.signal.aborted) {
+          this.log.error(`Unexpected error: ${(0, import_errors.describeError)(err)}`);
+        }
+      });
     }, ms);
   }
   /** Restores the session or logs in. */
@@ -109,18 +133,8 @@ class Blink extends utils.Adapter {
       }
       this.session = (0, import_session_store.decodeSession)((_b = await this.getStateAsync("auth.session")) == null ? void 0 : _b.val, this.codec);
       if (this.session) {
-        try {
-          await this.ensureFresh();
-          await this.oauth.account(this.session.accessToken);
-          await this.online();
-          return;
-        } catch (err) {
-          if (!(err instanceof import_errors.SessionExpiredError)) {
-            throw err;
-          }
-          this.log.info(`${err.message} - logging in again`);
-          await this.dropSession();
-        }
+        await this.online();
+        return;
       }
       await this.login();
     } catch (err) {
@@ -191,10 +205,14 @@ class Blink extends utils.Adapter {
     }
     await this.online();
   }
-  /** Renews the access token when it expires soon. */
-  async ensureFresh() {
+  /**
+   * Renews the access token when it expires soon.
+   *
+   * @param force - Renew in any case (Blink has rejected the token)
+   */
+  async ensureFresh(force = false) {
     const session = this.session;
-    if (!session || session.expiresAt - Date.now() > REFRESH_MARGIN_MS) {
+    if (!session || !force && session.expiresAt - Date.now() > REFRESH_MARGIN_MS) {
       return;
     }
     if (!session.refreshToken) {
@@ -205,29 +223,54 @@ class Blink extends utils.Adapter {
     await this.saveSession();
     this.log.debug("Access token renewed");
   }
-  /** Connected: reset the backoff and plan the next token refresh. */
+  /** Logged in: start polling. The first successful poll sets info.connection. */
   async online() {
-    var _a, _b;
-    this.retrySeconds = RETRY_START_S;
-    this.expiredRetried = false;
-    await this.setState("info.connection", true, true);
     await this.setLoginState("ok");
-    const delay = Math.max(
-      REFRESH_MIN_DELAY_MS,
-      ((_b = (_a = this.session) == null ? void 0 : _a.expiresAt) != null ? _b : 0) - Date.now() - REFRESH_MARGIN_MS + 1e3
-    );
-    this.schedule(delay, () => this.refreshCycle());
-    this.log.debug(
-      `Next token refresh in ${Math.round(delay / 6e4)} min, polling (phase 3) every ${this.pollSeconds} s`
-    );
+    await this.poll();
   }
-  async refreshCycle() {
+  /**
+   * One polling cycle. Backoff and session retry are only reset here: a login that works while the
+   * API does not must neither end in a login loop nor lose the backoff (audit B.11.5).
+   */
+  async poll() {
+    const started = Date.now();
     try {
-      await this.ensureFresh();
-      await this.online();
+      const homescreen = await this.fetchHomescreen();
+      if (this.abort.signal.aborted) {
+        return;
+      }
+      await this.tree.apply(homescreen);
+      await this.setState("info.lastPoll", Date.now(), true);
+      await this.setConnection(true);
+      await this.setLoginState("ok");
+      this.retrySeconds = RETRY_START_S;
+      this.expiredRetried = false;
+      this.log.debug(
+        `Poll took ${Date.now() - started} ms: ${homescreen.networks.length} networks, ${homescreen.syncModules.length} Sync Modules, ${homescreen.devices.length} devices`
+      );
+      this.schedule((0, import_config.pollDelayMs)(this.pollSeconds), () => this.poll());
     } catch (err) {
       await this.handleFailure(err);
     }
+  }
+  /** Reads the homescreen. A rejected token is renewed once, because a new login could trigger a 2FA SMS. */
+  async fetchHomescreen() {
+    await this.ensureFresh();
+    try {
+      return await this.rest.homescreen(this.currentSession());
+    } catch (err) {
+      if (!(err instanceof import_errors.SessionExpiredError)) {
+        throw err;
+      }
+      await this.ensureFresh(true);
+      return this.rest.homescreen(this.currentSession());
+    }
+  }
+  currentSession() {
+    if (!this.session) {
+      throw new import_errors.SessionExpiredError("no session");
+    }
+    return this.session;
   }
   /**
    * Error handling without login loops (audit B.11.5): rejected credentials stop, rate limits wait,
@@ -239,7 +282,7 @@ class Blink extends utils.Adapter {
     if (err instanceof import_errors.AbortedError) {
       return;
     }
-    await this.setState("info.connection", false, true);
+    await this.setConnection(false);
     if (err instanceof import_errors.CredentialsRejectedError) {
       await this.setLoginState("credentialsRejected");
       this.log.error(`${err.message}. No further attempts - check the instance settings.`);
@@ -271,7 +314,7 @@ class Blink extends utils.Adapter {
       }
     }
     await this.setLoginState("error");
-    this.log.warn(`Blink login failed: ${(0, import_errors.describeError)(err)}. Next attempt in ${this.retrySeconds} s`);
+    this.log.warn(`Blink connection failed: ${(0, import_errors.describeError)(err)}. Next attempt in ${this.retrySeconds} s`);
     this.schedule(this.retrySeconds * 1e3, () => this.connect());
     this.retrySeconds = Math.min(this.retrySeconds * 2, RETRY_MAX_S);
   }
@@ -343,6 +386,12 @@ class Blink extends utils.Adapter {
   async dropSession() {
     this.session = void 0;
     await this.setState("auth.session", "", true);
+  }
+  async setConnection(connected) {
+    if (connected !== this.cloudConnected) {
+      this.cloudConnected = connected;
+      await this.setState("info.connection", connected, true);
+    }
   }
   async setLoginState(state) {
     if (state !== this.loginState) {

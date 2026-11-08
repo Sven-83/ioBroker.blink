@@ -17,7 +17,6 @@ import {
     OAUTH_ORIGIN,
     OAUTH_SIGNIN_PATH,
     OAUTH_TOKEN_PATH,
-    RATE_LIMIT_FALLBACK_S,
     REDIRECT_URI,
     REST_DEFAULT_ORIGIN,
     SCOPE,
@@ -33,7 +32,7 @@ import {
     SessionExpiredError,
     TwoFactorRejectedError,
 } from './errors';
-import { CookieJar, field, parseJson, type HttpClient, type HttpResponse } from './http';
+import { CookieJar, field, parseJson, retryAfterMs, type HttpClient, type HttpResponse } from './http';
 import type { PendingLogin, TokenSet, TwoFactorChallenge } from './types';
 
 /** Result of the first login step */
@@ -155,11 +154,6 @@ function oauthPath(location: string): string | undefined {
     } catch {
         return undefined;
     }
-}
-
-function retryAfterMs(response: HttpResponse): number {
-    const seconds = Number(field(parseJson(response.body), 'next_time_in_secs'));
-    return (Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : RATE_LIMIT_FALLBACK_S) * 1000;
 }
 
 function isTwoFactorChallenge(response: HttpResponse): boolean {

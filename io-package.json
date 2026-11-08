@@ -143,6 +143,18 @@
             "native": {}
         },
         {
+            "_id": "info.lastPoll",
+            "type": "state",
+            "common": {
+                "name": "Last successful query of the Blink cloud",
+                "type": "number",
+                "role": "date",
+                "read": true,
+                "write": false
+            },
+            "native": {}
+        },
+        {
             "_id": "auth",
             "type": "channel",
             "common": {

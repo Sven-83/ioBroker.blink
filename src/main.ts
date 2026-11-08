@@ -2,7 +2,7 @@
  * ioBroker.blink
  * Adapter lifecycle only - Blink API in lib/api, object tree in lib/model, helpers in lib/util.
  *
- * Phase 2: login with 2FA, encrypted session, token refresh, backoff. Polling follows in phase 3.
+ * Phase 3: login with 2FA, encrypted session, token refresh, backoff, polling of the homescreen.
  */
 
 import * as utils from '@iobroker/adapter-core';
@@ -15,7 +15,9 @@ import {
     describeError,
 } from './lib/api/errors';
 import { HttpClient } from './lib/api/http';
+import type { Homescreen } from './lib/api/homescreen';
 import { OAuthFlow, newHardwareId } from './lib/api/oauth';
+import { RestClient } from './lib/api/rest';
 import type { Session, TokenSet } from './lib/api/types';
 import {
     decodePending,
@@ -24,7 +26,15 @@ import {
     encodeSession,
     type SecretCodec,
 } from './lib/model/session-store';
-import { TEST_ORIGIN_ENV, normalizeEmail, normalizePin, pollIntervalSeconds, testOrigin } from './lib/util/config';
+import { ObjectTree } from './lib/model/tree';
+import {
+    TEST_ORIGIN_ENV,
+    normalizeEmail,
+    normalizePin,
+    pollDelayMs,
+    pollIntervalSeconds,
+    testOrigin,
+} from './lib/util/config';
 
 /** First retry after a failed login, doubled up to RETRY_MAX_S (audit B.11.4) */
 const RETRY_START_S = 60;
@@ -33,8 +43,6 @@ const RETRY_MAX_S = 1800;
 const START_JITTER_MS = 2_000;
 /** The access token is renewed this long before it expires */
 const REFRESH_MARGIN_MS = 5 * 60_000;
-/** Shortest wait before a scheduled refresh */
-const REFRESH_MIN_DELAY_MS = 60_000;
 
 type LoginState =
     | 'ok'
@@ -49,12 +57,15 @@ type LoginState =
 class Blink extends utils.Adapter {
     private readonly abort = new AbortController();
     private oauth: OAuthFlow | undefined;
+    private rest: RestClient | undefined;
+    private tree: ObjectTree | undefined;
     private session: Session | undefined;
     private timer: ioBroker.Timeout | undefined;
     private retrySeconds = RETRY_START_S;
     private email = '';
     private pollSeconds = 0;
     private connecting = false;
+    private cloudConnected = false;
     private expiredRetried = false;
     private loginState: LoginState | undefined;
     private readonly codec: SecretCodec = {
@@ -93,13 +104,29 @@ class Blink extends utils.Adapter {
         if (origin) {
             this.log.warn(`Test mode: all requests go to ${origin}`);
         }
-        this.oauth = new OAuthFlow(new HttpClient({ testOrigin: origin, signal: this.abort.signal }));
+        const http = new HttpClient({ testOrigin: origin, signal: this.abort.signal });
+        this.oauth = new OAuthFlow(http);
+        this.rest = new RestClient(http);
+        this.tree = new ObjectTree({
+            writeObject: (id, object) => this.extendObjectAsync(id, object),
+            writeState: (id, value) => this.setState(id, value, true),
+            listDevices: async () => {
+                const prefix = `${this.namespace}.`;
+                const view = await this.getObjectViewAsync('system', 'device', {
+                    startkey: prefix,
+                    endkey: `${prefix}香`,
+                });
+                return view.rows.map(row => row.id.slice(prefix.length));
+            },
+            info: message => this.log.info(message),
+        });
         await this.setLoginState('connecting');
         this.schedule(Math.floor(Math.random() * START_JITTER_MS), () => this.connect());
     }
 
     /**
-     * Runs a single chained timer - retry, refresh and (later) polling never overlap (audit B.11.2).
+     * Runs a single chained timer - retry and polling (which includes the token refresh) never overlap
+     * (audit B.11.2). The next run is only planned when the current one has finished.
      *
      * @param ms - Delay
      * @param task - Task to run
@@ -108,7 +135,11 @@ class Blink extends utils.Adapter {
         this.clearTimeout(this.timer);
         this.timer = this.setTimeout(() => {
             this.timer = undefined;
-            void task();
+            task().catch((err: unknown) => {
+                if (!this.abort.signal.aborted) {
+                    this.log.error(`Unexpected error: ${describeError(err)}`);
+                }
+            });
         }, ms);
     }
 
@@ -129,18 +160,8 @@ class Blink extends utils.Adapter {
 
             this.session = decodeSession((await this.getStateAsync('auth.session'))?.val, this.codec);
             if (this.session) {
-                try {
-                    await this.ensureFresh();
-                    await this.oauth.account(this.session.accessToken);
-                    await this.online();
-                    return;
-                } catch (err) {
-                    if (!(err instanceof SessionExpiredError)) {
-                        throw err;
-                    }
-                    this.log.info(`${err.message} - logging in again`);
-                    await this.dropSession();
-                }
+                await this.online();
+                return;
             }
             await this.login();
         } catch (err) {
@@ -217,10 +238,14 @@ class Blink extends utils.Adapter {
         await this.online();
     }
 
-    /** Renews the access token when it expires soon. */
-    private async ensureFresh(): Promise<void> {
+    /**
+     * Renews the access token when it expires soon.
+     *
+     * @param force - Renew in any case (Blink has rejected the token)
+     */
+    private async ensureFresh(force = false): Promise<void> {
         const session = this.session;
-        if (!session || session.expiresAt - Date.now() > REFRESH_MARGIN_MS) {
+        if (!session || (!force && session.expiresAt - Date.now() > REFRESH_MARGIN_MS)) {
             return;
         }
         if (!session.refreshToken) {
@@ -232,29 +257,58 @@ class Blink extends utils.Adapter {
         this.log.debug('Access token renewed');
     }
 
-    /** Connected: reset the backoff and plan the next token refresh. */
+    /** Logged in: start polling. The first successful poll sets info.connection. */
     private async online(): Promise<void> {
-        this.retrySeconds = RETRY_START_S;
-        this.expiredRetried = false;
-        await this.setState('info.connection', true, true);
         await this.setLoginState('ok');
-        const delay = Math.max(
-            REFRESH_MIN_DELAY_MS,
-            (this.session?.expiresAt ?? 0) - Date.now() - REFRESH_MARGIN_MS + 1_000,
-        );
-        this.schedule(delay, () => this.refreshCycle());
-        this.log.debug(
-            `Next token refresh in ${Math.round(delay / 60_000)} min, polling (phase 3) every ${this.pollSeconds} s`,
-        );
+        await this.poll();
     }
 
-    private async refreshCycle(): Promise<void> {
+    /**
+     * One polling cycle. Backoff and session retry are only reset here: a login that works while the
+     * API does not must neither end in a login loop nor lose the backoff (audit B.11.5).
+     */
+    private async poll(): Promise<void> {
+        const started = Date.now();
         try {
-            await this.ensureFresh();
-            await this.online();
+            const homescreen = await this.fetchHomescreen();
+            if (this.abort.signal.aborted) {
+                return;
+            }
+            await this.tree!.apply(homescreen);
+            await this.setState('info.lastPoll', Date.now(), true);
+            await this.setConnection(true);
+            await this.setLoginState('ok');
+            this.retrySeconds = RETRY_START_S;
+            this.expiredRetried = false;
+            this.log.debug(
+                `Poll took ${Date.now() - started} ms: ${homescreen.networks.length} networks, ` +
+                    `${homescreen.syncModules.length} Sync Modules, ${homescreen.devices.length} devices`,
+            );
+            this.schedule(pollDelayMs(this.pollSeconds), () => this.poll());
         } catch (err) {
             await this.handleFailure(err);
         }
+    }
+
+    /** Reads the homescreen. A rejected token is renewed once, because a new login could trigger a 2FA SMS. */
+    private async fetchHomescreen(): Promise<Homescreen> {
+        await this.ensureFresh();
+        try {
+            return await this.rest!.homescreen(this.currentSession());
+        } catch (err) {
+            if (!(err instanceof SessionExpiredError)) {
+                throw err;
+            }
+            await this.ensureFresh(true);
+            return this.rest!.homescreen(this.currentSession());
+        }
+    }
+
+    private currentSession(): Session {
+        if (!this.session) {
+            throw new SessionExpiredError('no session');
+        }
+        return this.session;
     }
 
     /**
@@ -267,7 +321,7 @@ class Blink extends utils.Adapter {
         if (err instanceof AbortedError) {
             return;
         }
-        await this.setState('info.connection', false, true);
+        await this.setConnection(false);
 
         if (err instanceof CredentialsRejectedError) {
             await this.setLoginState('credentialsRejected');
@@ -301,7 +355,7 @@ class Blink extends utils.Adapter {
         }
 
         await this.setLoginState('error');
-        this.log.warn(`Blink login failed: ${describeError(err)}. Next attempt in ${this.retrySeconds} s`);
+        this.log.warn(`Blink connection failed: ${describeError(err)}. Next attempt in ${this.retrySeconds} s`);
         this.schedule(this.retrySeconds * 1000, () => this.connect());
         this.retrySeconds = Math.min(this.retrySeconds * 2, RETRY_MAX_S);
     }
@@ -376,6 +430,13 @@ class Blink extends utils.Adapter {
     private async dropSession(): Promise<void> {
         this.session = undefined;
         await this.setState('auth.session', '', true);
+    }
+
+    private async setConnection(connected: boolean): Promise<void> {
+        if (connected !== this.cloudConnected) {
+            this.cloudConnected = connected;
+            await this.setState('info.connection', connected, true);
+        }
     }
 
     private async setLoginState(state: LoginState): Promise<void> {

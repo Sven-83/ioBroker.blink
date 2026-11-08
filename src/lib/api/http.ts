@@ -2,7 +2,7 @@
  * Small HTTP layer on top of the global fetch: timeout, manual redirects, cookie jar, test origin.
  */
 
-import { REQUEST_TIMEOUT_MS } from './constants';
+import { RATE_LIMIT_FALLBACK_S, REQUEST_TIMEOUT_MS } from './constants';
 import { AbortedError } from './errors';
 
 /** Response with the body already read as text */
@@ -181,4 +181,19 @@ export function parseJson(text: string): unknown {
  */
 export function field(value: unknown, key: string): unknown {
     return value !== null && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+/**
+ * Wait time of a rate-limit answer: Retry-After header, next_time_in_secs in the body, otherwise a fallback.
+ *
+ * @param response - Answer with status 429
+ */
+export function retryAfterMs(response: HttpResponse): number {
+    for (const raw of [response.headers.get('retry-after'), field(parseJson(response.body), 'next_time_in_secs')]) {
+        const seconds = Number(raw);
+        if (raw !== null && Number.isFinite(seconds) && seconds > 0) {
+            return Math.ceil(seconds) * 1000;
+        }
+    }
+    return RATE_LIMIT_FALLBACK_S * 1000;
 }

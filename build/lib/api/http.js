@@ -21,7 +21,8 @@ __export(http_exports, {
   CookieJar: () => CookieJar,
   HttpClient: () => HttpClient,
   field: () => field,
-  parseJson: () => parseJson
+  parseJson: () => parseJson,
+  retryAfterMs: () => retryAfterMs
 });
 module.exports = __toCommonJS(http_exports);
 var import_constants = require("./constants");
@@ -145,11 +146,21 @@ function parseJson(text) {
 function field(value, key) {
   return value !== null && typeof value === "object" ? value[key] : void 0;
 }
+function retryAfterMs(response) {
+  for (const raw of [response.headers.get("retry-after"), field(parseJson(response.body), "next_time_in_secs")]) {
+    const seconds = Number(raw);
+    if (raw !== null && Number.isFinite(seconds) && seconds > 0) {
+      return Math.ceil(seconds) * 1e3;
+    }
+  }
+  return import_constants.RATE_LIMIT_FALLBACK_S * 1e3;
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   CookieJar,
   HttpClient,
   field,
-  parseJson
+  parseJson,
+  retryAfterMs
 });
 //# sourceMappingURL=http.js.map

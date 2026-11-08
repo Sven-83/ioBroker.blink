@@ -15,6 +15,62 @@ const PIN = '481516';
 const ACCOUNT_ID = 4242;
 const TIER = 'e006';
 
+/** Invented homescreen with one device of each family */
+function defaultHomescreen() {
+    return {
+        networks: [{ id: 1001, name: 'Test Home', armed: true }],
+        sync_modules: [
+            {
+                id: 2001,
+                name: 'Test Sync',
+                network_id: 1001,
+                serial: 'TESTSYNC0001',
+                status: 'online',
+                local_storage_enabled: true,
+                local_storage_status: 'active',
+            },
+        ],
+        cameras: [
+            {
+                id: 3001,
+                name: 'Test Camera',
+                network_id: 1001,
+                serial: 'TESTCAM0001',
+                type: 'catalina',
+                enabled: true,
+                status: 'done',
+                battery: 'ok',
+                signals: { lfr: 5, wifi: 4, temp: 68, battery: 3 },
+            },
+        ],
+        owls: [
+            {
+                id: 3002,
+                name: 'Test Mini',
+                network_id: 1001,
+                serial: 'TESTMINI0001',
+                type: 'owl',
+                enabled: false,
+                status: 'online',
+            },
+        ],
+        doorbells: [
+            {
+                id: 3003,
+                name: 'Test Doorbell',
+                network_id: 1001,
+                serial: 'TESTBELL0001',
+                type: 'lotus',
+                enabled: true,
+                status: 'done',
+                battery: 'low',
+                battery_voltage: 148,
+                signals: { wifi: 2, temp: 50, battery: 1 },
+            },
+        ],
+    };
+}
+
 /**
  * Starts the fake cloud.
  *
@@ -22,15 +78,34 @@ const TIER = 'e006';
  * @param {'none'|'412'|'tsv'} [options.twoFactor] - 2FA behaviour of the sign-in
  * @param {boolean} [options.rateLimit2fa] - 2FA verify answers 429
  * @param {number} [options.expiresIn] - Lifetime of access tokens in seconds
+ * @param {number} [options.homescreenStatus] - HTTP status of the homescreen (other than 200: error answer)
+ * @param {unknown} [options.homescreen] - Answer of the homescreen
  */
 async function startFakeBlink(options = {}) {
-    const config = { twoFactor: 'none', rateLimit2fa: false, expiresIn: 14_400, ...options };
+    const config = {
+        twoFactor: 'none',
+        rateLimit2fa: false,
+        expiresIn: 14_400,
+        homescreenStatus: 200,
+        homescreen: defaultHomescreen(),
+        ...options,
+    };
     const sessions = new Map(); // sid -> { challenge, csrf, authenticated, awaiting2fa }
     const codes = new Map(); // code -> challenge
     const accessTokens = new Set();
     const refreshTokens = new Set();
     const allIssued = [];
-    const stats = { authorize: 0, signin: 0, codesSent: 0, verify: 0, tokens: 0, refresh: 0, tierInfo: 0 };
+    const stats = {
+        authorize: 0,
+        signin: 0,
+        codesSent: 0,
+        verify: 0,
+        tokens: 0,
+        refresh: 0,
+        tierInfo: 0,
+        homescreen: 0,
+        homescreenRequests: 0,
+    };
     const requests = [];
 
     const issueTokens = () => {
@@ -169,6 +244,21 @@ async function startFakeBlink(options = {}) {
             return send(res, 200, { tier: TIER, account_id: ACCOUNT_ID });
         }
 
+        if (req.method === 'GET' && url.pathname === `/api/v3/accounts/${ACCOUNT_ID}/homescreen`) {
+            stats.homescreenRequests++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            if (config.homescreenStatus === 429) {
+                return send(res, 429, { message: 'Too many requests' }, { 'Retry-After': '120' });
+            }
+            if (config.homescreenStatus !== 200) {
+                return send(res, config.homescreenStatus, { message: 'error' });
+            }
+            stats.homescreen++;
+            return send(res, 200, config.homescreen);
+        }
+
         send(res, 404, { message: 'not found' });
     });
 
@@ -188,6 +278,10 @@ async function startFakeBlink(options = {}) {
         revokeAll() {
             accessTokens.clear();
             refreshTokens.clear();
+        },
+        /** Invalidates the access tokens only: the refresh token still works */
+        revokeAccessTokens() {
+            accessTokens.clear();
         },
         /** All tokens issued so far (to check that none of them leaks) */
         issuedTokens() {

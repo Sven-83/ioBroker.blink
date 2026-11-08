@@ -23,6 +23,19 @@ export function pollIntervalSeconds(value: unknown): number {
     return Math.min(Math.max(seconds, POLL_MIN_S), POLL_MAX_S);
 }
 
+/** Largest random addition to the polling interval (audit B.11.1) */
+export const POLL_JITTER_MS = 5_000;
+
+/**
+ * Delay until the next poll: the interval plus a random jitter.
+ *
+ * @param seconds - Polling interval
+ * @param random - Random source, 0 to below 1
+ */
+export function pollDelayMs(seconds: number, random: () => number = Math.random): number {
+    return seconds * 1000 + Math.floor(random() * POLL_JITTER_MS);
+}
+
 /**
  * Trimmed e-mail address, or undefined if it does not look like one.
  *

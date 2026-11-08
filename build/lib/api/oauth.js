@@ -104,10 +104,6 @@ function oauthPath(location) {
     return void 0;
   }
 }
-function retryAfterMs(response) {
-  const seconds = Number((0, import_http.field)((0, import_http.parseJson)(response.body), "next_time_in_secs"));
-  return (Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : import_constants.RATE_LIMIT_FALLBACK_S) * 1e3;
-}
 function isTwoFactorChallenge(response) {
   if (response.status === 412) {
     return true;
@@ -173,7 +169,7 @@ class OAuthFlow {
       cookies
     });
     if (signin.status === 429) {
-      throw new import_errors.RateLimitedError(retryAfterMs(signin));
+      throw new import_errors.RateLimitedError((0, import_http.retryAfterMs)(signin));
     }
     if (isTwoFactorChallenge(signin)) {
       return {
@@ -218,7 +214,7 @@ class OAuthFlow {
       cookies
     });
     if (response.status === 429) {
-      throw new import_errors.RateLimitedError(retryAfterMs(response));
+      throw new import_errors.RateLimitedError((0, import_http.retryAfterMs)(response));
     }
     if (response.status >= 400) {
       throw new import_errors.TwoFactorRejectedError(response.status);
@@ -245,7 +241,7 @@ class OAuthFlow {
       }
     });
     if (response.status === 429) {
-      throw new import_errors.RateLimitedError(retryAfterMs(response));
+      throw new import_errors.RateLimitedError((0, import_http.retryAfterMs)(response));
     }
     if (response.status === 400 || response.status === 401 || response.status === 403) {
       throw new import_errors.SessionExpiredError(`refresh rejected (HTTP ${response.status})`);
