@@ -116,8 +116,14 @@ describe('camera page core', () => {
         expect(core.imageSrc(NS, '/blink.1/a.jpg', 1)).to.equal('');
         expect(core.imageSrc(NS, '/blink.0/../system/x', 1)).to.equal('');
         expect(core.imageSrc(NS, '/blink.0/.hidden', 1)).to.equal('');
-        // the adapter stores images as cameras/<id>.jpg (image-store.ts)
+        // the adapter stores images as cameras/<id>.jpg and writes the address with ?t=<saved at> (image-store.ts)
         expect(core.imageSrc(NS, `/${NS}/${fileName(42)}`, 1)).to.not.equal('');
+        expect(core.imageSrc(NS, '/blink.0/cameras/42.jpg?t=1794238918100', 5)).to.equal(
+            '../blink.0/cameras/42.jpg?t=1794238918100',
+        );
+        expect(core.imageSrc(NS, '/blink.0/cameras/42.jpg?x=1', 5)).to.equal('');
+        expect(core.imageSrc(NS, '/blink.0/cameras/42.jpg?t=1?t=2', 5)).to.equal('');
+        expect(core.imageSrc(NS, '/blink.0/cameras/42.jpg?t=1&u=//evil', 5)).to.equal('');
         expect(core.imageSrc(NS, '/blink.0/cameras/721232.jpg', 5)).to.equal('../blink.0/cameras/721232.jpg?t=5');
         expect(core.imageSrc(NS, '/blink.0/a/b/c.jpg', 1)).to.equal('');
         expect(core.imageSrc(NS, '/blink.0/cameras/../x.jpg', 1)).to.equal('');

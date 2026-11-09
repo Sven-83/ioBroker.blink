@@ -2,6 +2,7 @@ const path = require('path');
 const { tests } = require('@iobroker/testing');
 const { expect } = require('chai');
 const { startFakeBlink } = require('./lib/fake-blink');
+const pageCore = require('../www/js/core.js');
 
 const NS = 'blink.0';
 const ENV_KEY = 'BLINK_TEST_ORIGIN';
@@ -628,6 +629,12 @@ tests.integration(path.join(__dirname, '..'), {
                 expect(await stateVal(harness, `${CAM}.imageTime`)).to.be.greaterThan(Date.now() - 60_000);
                 expect(cloud.stats.snapshot).to.equal(1);
                 cloud.config.snapshotDelayMs = 0;
+            });
+
+            it('writes an image address the camera page accepts', async () => {
+                const address = await stateVal(harness, `${CAM}.image`);
+                const src = pageCore.imageSrc(NS, address, await stateVal(harness, `${CAM}.imageTime`));
+                expect(src, `camera page rejects ${address}`).to.match(/^\.\.\/blink\.0\/cameras\/3001\.jpg\?t=\d+$/);
             });
 
             it('confirms the button with ack: true', async () => {

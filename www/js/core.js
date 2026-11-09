@@ -315,7 +315,8 @@
 
     /**
      * Address of the stored image for an <img>. Only files of this instance are accepted, nothing else the
-     * state might contain. The time makes the browser load a new image with the same name.
+     * state might contain. The adapter writes /<namespace>/cameras/<id>.jpg?t=<saved at>; the time makes the
+     * browser load a new image with the same name. Without it, imageTime is used.
      *
      * @param {string} namespace - e.g. blink.0
      * @param {unknown} url - Value of the image state
@@ -327,10 +328,17 @@
             return '';
         }
         const prefix = `/${namespace}/`;
-        const name = url.slice(prefix.length);
+        const [path, query, ...rest] = url.split('?');
+        const name = path.slice(prefix.length);
         // file names of the image store: cameras/<id>.jpg - at most one folder, no "..", no hidden files
-        if (!url.startsWith(prefix) || !/^(?:[A-Za-z0-9_-]{1,40}\/)?[A-Za-z0-9_-][A-Za-z0-9._-]{0,80}$/.test(name)) {
+        if (!path.startsWith(prefix) || !/^(?:[A-Za-z0-9_-]{1,40}\/)?[A-Za-z0-9_-][A-Za-z0-9._-]{0,80}$/.test(name)) {
             return '';
+        }
+        if (rest.length > 0 || (query !== undefined && !/^t=\d{1,15}$/.test(query))) {
+            return '';
+        }
+        if (query !== undefined) {
+            return `..${prefix}${name}?${query}`;
         }
         const stamp = typeof time === 'number' && Number.isFinite(time) ? `?t=${Math.round(time)}` : '';
         return `..${prefix}${name}${stamp}`;
