@@ -328,7 +328,8 @@
         }
         const prefix = `/${namespace}/`;
         const name = url.slice(prefix.length);
-        if (!url.startsWith(prefix) || !/^[A-Za-z0-9._-]{1,120}$/.test(name) || name.startsWith('.')) {
+        // file names of the image store: cameras/<id>.jpg - at most one folder, no "..", no hidden files
+        if (!url.startsWith(prefix) || !/^(?:[A-Za-z0-9_-]{1,40}\/)?[A-Za-z0-9_-][A-Za-z0-9._-]{0,80}$/.test(name)) {
             return '';
         }
         const stamp = typeof time === 'number' && Number.isFinite(time) ? `?t=${Math.round(time)}` : '';

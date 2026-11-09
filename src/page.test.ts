@@ -4,6 +4,7 @@
 
 import { expect } from 'chai';
 import type * as Core from '../www/js/core.js';
+import { fileName } from './lib/model/image-store';
 
 // plain browser script with a CommonJS fallback
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- the page core is a plain browser script, loaded via require
@@ -115,7 +116,12 @@ describe('camera page core', () => {
         expect(core.imageSrc(NS, '/blink.1/a.jpg', 1)).to.equal('');
         expect(core.imageSrc(NS, '/blink.0/../system/x', 1)).to.equal('');
         expect(core.imageSrc(NS, '/blink.0/.hidden', 1)).to.equal('');
-        expect(core.imageSrc(NS, '/blink.0/sub/a.jpg', 1)).to.equal('');
+        // the adapter stores images as cameras/<id>.jpg (image-store.ts)
+        expect(core.imageSrc(NS, `/${NS}/${fileName(42)}`, 1)).to.not.equal('');
+        expect(core.imageSrc(NS, '/blink.0/cameras/721232.jpg', 5)).to.equal('../blink.0/cameras/721232.jpg?t=5');
+        expect(core.imageSrc(NS, '/blink.0/a/b/c.jpg', 1)).to.equal('');
+        expect(core.imageSrc(NS, '/blink.0/cameras/../x.jpg', 1)).to.equal('');
+        expect(core.imageSrc(NS, '/blink.0/cameras/.x', 1)).to.equal('');
         expect(core.imageSrc(NS, null, 1)).to.equal('');
     });
 
