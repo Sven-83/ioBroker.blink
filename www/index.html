@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<title>Blink</title>
+<link rel="stylesheet" href="page.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="banner" id="banner" role="status"></div>
+  <div class="topbar">
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <div class="topbar-right">
+      <div class="cloud" id="cloud" role="status"></div>
+      <div class="btn btn-ghost view-toggle hidden" id="view-toggle" role="button" tabindex="0"></div>
+    </div>
+  </div>
+  <div class="empty" id="empty"></div>
+  <div class="sections" id="sections"></div>
+</div>
+
+<div class="overlay" id="live" role="dialog" aria-modal="true">
+  <div class="live-box">
+    <div class="live-head"><span id="live-name"></span><div class="close" id="live-close" role="button" tabindex="0">✕</div></div>
+    <div class="live-frame"><img id="live-img" alt=""><div class="live-status" id="live-status"></div></div>
+  </div>
+</div>
+
+<div class="overlay" id="pin" role="dialog" aria-modal="true">
+  <div class="pin-box">
+    <div class="pin-title" id="pin-title"></div>
+    <div class="pin-hint" id="pin-hint"></div>
+    <div class="pin-dots" id="pin-dots"></div>
+    <div class="pin-message" id="pin-message" role="status"></div>
+    <div class="pin-pad" id="pin-pad"></div>
+  </div>
+</div>
+
+<!-- socket client of the web adapter (same origin, uses the web adapter login if enabled) -->
+<script src="../lib/js/socket.io.js"></script>
+<script src="js/core.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -97,6 +97,8 @@ function defaultHomescreen() {
  * @param {string} [options.imageBody] - Answer of image downloads instead of an image
  * @param {object} [options.commandAnswer] - Fixed answer of the command status
  * @param {object} [options.liveAnswer] - Answer to the start of a live session
+ * @param {number} [options.motionNewPathStatus] - HTTP status of the current motion path of cameras
+ * @param {boolean} [options.motionIgnored] - Motion commands are accepted, but "enabled" never changes
  */
 async function startFakeBlink(options = {}) {
     const config = {
@@ -116,6 +118,8 @@ async function startFakeBlink(options = {}) {
         snapshotSameContent: false,
         snapshotCommandFails: false,
         imageStatus: 200,
+        motionNewPathStatus: 200,
+        motionIgnored: false,
         liveAnswer: {
             command_id: 950,
             server: 'immis://stream-test.immedia-semi.com:443/fake-transaction__IMDS_TEST?client_id=250',
@@ -148,6 +152,7 @@ async function startFakeBlink(options = {}) {
         image: 0,
         liveStart: 0,
         liveDone: 0,
+        motion: 0,
     };
 
     const allDevices = () => [
@@ -389,6 +394,43 @@ async function startFakeBlink(options = {}) {
                 return send(res, 401, { message: 'Unauthorized Access', code: 101 });
             }
             return acceptSnapshot(res, Number(snapshotPath[1]));
+        }
+
+        const account = `/api/v1/accounts/${ACCOUNT_ID}/networks/(\\d+)`;
+        const motionNew = url.pathname.match(new RegExp(`^${account}/(cameras|doorbells)/(\\d+)/(enable|disable)$`));
+        const motionOld = url.pathname.match(/^\/network\/(\d+)\/(camera)\/(\d+)\/(enable|disable)$/);
+        const motionOwl = url.pathname.match(new RegExp(`^${account}/(owls)/(\\d+)/config$`));
+        if (req.method === 'POST' && (motionNew || motionOld || motionOwl)) {
+            stats.motion++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            if (motionNew && motionNew[2] === 'cameras' && config.motionNewPathStatus !== 200) {
+                return send(res, config.motionNewPathStatus, { message: 'error' });
+            }
+            const match = motionNew ?? motionOld ?? motionOwl;
+            let enabled = match[4] === 'enable';
+            if (motionOwl) {
+                enabled = JSON.parse(body || '{}').enabled;
+                if (typeof enabled !== 'boolean') {
+                    return send(res, 400, { message: 'enabled missing' });
+                }
+            }
+            const deviceId = Number(match[3]);
+            const device = [
+                ...(config.homescreen.cameras ?? []),
+                ...(config.homescreen.owls ?? []),
+                ...(config.homescreen.doorbells ?? []),
+            ].find(item => item.id === deviceId);
+            if (!device) {
+                return send(res, 404, { message: 'Camera not found' });
+            }
+            if (!config.motionIgnored) {
+                device.enabled = enabled;
+            }
+            const id = nextCommandId++;
+            commands.set(id, { doneAt: Date.now(), failed: false });
+            return send(res, 200, { id, network_id: Number(match[1]), state: 'new' });
         }
 
         const imagePath = url.pathname.match(/^\/media\/(\d+)\/thumb-(\d+)\.jpg$/);

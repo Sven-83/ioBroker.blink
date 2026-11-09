@@ -1,6 +1,7 @@
 // ioBroker eslint template configuration file for js and ts files
 // Please note that esm or react based modules need additional modules loaded.
 import config from '@iobroker/eslint-config';
+import globals from 'globals';
 
 export default [
     ...config,
@@ -21,6 +22,19 @@ export default [
             'widgets/**/*.js',
             'src-widgets/'
         ],
+    },
+    {
+        // camera page served by the web adapter (plain scripts, typed via JSDoc)
+        files: ['www/**/*.js'],
+        languageOptions: {
+            sourceType: 'script',
+            globals: { ...globals.browser, module: 'readonly' },
+        },
+        rules: {
+            // @type is how plain JS files carry types
+            'jsdoc/check-tag-names': 'off',
+            'jsdoc/require-returns-description': 'off',
+        },
     },
     {
         // you may disable some 'jsdoc' warnings - but using jsdoc is highly recommended

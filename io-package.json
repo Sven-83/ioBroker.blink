@@ -82,7 +82,17 @@
             {
                 "admin": ">=7.6.20"
             }
-        ]
+        ],
+        "localLinks": {
+            "_default": {
+                "link": "%web_protocol%://%ip%:%web_port%/blink/index.html",
+                "intro": true,
+                "name": {
+                    "en": "Camera page",
+                    "de": "Kamera-Seite"
+                }
+            }
+        }
     },
     "native": {
         "email": "",

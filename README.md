@@ -4,8 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Work in progress:** complete rewrite in TypeScript (branch `ts-rewrite`). Not usable yet.
-> **In Arbeit:** komplette Neufassung in TypeScript (Branch `ts-rewrite`). Noch nicht nutzbar.
+> **Work in progress:** complete rewrite in TypeScript. Login, arming, snapshots, live view and the camera page work; clips follow.
+> **In Arbeit:** komplette Neufassung in TypeScript. Login, Scharfschalten, Snapshots, Livebild und Kamera-Seite laufen; Clips folgen.
 
 [English](#english) | [Deutsch](#deutsch)
 
@@ -45,6 +45,25 @@ There are no npm releases; the adapter is installed from the `main` branch.
 | `info.connection` | Logged in to the Blink cloud |
 | `info.loginState` | `ok`, `connecting`, `twoFactorRequired`, `twoFactorRejected`, `credentialsRejected` (no further attempts until the settings change), `rateLimited`, `error` (retry with backoff), `noConfig` |
 | `auth.*` | Session, pending login and device ID - encrypted, do not edit |
+
+### Control
+| State | Meaning |
+|---|---|
+| `networks.<id>.armed` | Arm (`true`) or disarm (`false`); ack only after Blink reports the new state |
+| `networks.<id>.armWithAll` | The network is armed by `control.armSelected`. A setting: kept until you change it |
+| `control.armSelected` | Button: arms the selected networks |
+| `control.disarmAll` | Button: disarms all networks |
+| `cameras.<id>.enabled` | Motion detection on/off; ack only after Blink reports it |
+| `cameras.<id>.snapshot` | Button: new image, stored in the file storage (`cameras.<id>.image`) |
+
+### Camera page
+The web adapter serves a touch page at `http://<host>:<web port>/blink/index.html`: all cameras grouped by network,
+images with their age, arm/disarm, motion detection, new image and live view.
+- `?view=all` (default) shows all networks on one page, `?view=tabs` one network per tab.
+- `?pin=0_userdata.0.<path>` lets disarming ask for a PIN that a script checks: the page writes `kameras:<network id>`
+  to `<path>.pinZiel` and the entry to `<path>.pinEingabe` and shows `<path>.meldung`.
+- The live view needs the live image switched on in the settings and an address the browser can reach (not
+  `127.0.0.1`); it only works when the page is opened via http.
 
 ### Security
 Cameras show private areas. Only make ioBroker admin and web reachable with authentication and HTTPS.
@@ -87,6 +106,25 @@ Es gibt keine npm-Releases; installiert wird aus dem Branch `main`.
 | `info.loginState` | `ok`, `connecting`, `twoFactorRequired`, `twoFactorRejected`, `credentialsRejected` (keine weiteren Versuche, bis die Einstellungen geändert werden), `rateLimited`, `error` (neuer Versuch mit Backoff), `noConfig` |
 | `auth.*` | Sitzung, wartender Login und Geräte-ID - verschlüsselt, nicht ändern |
 
+### Steuerung
+| Datenpunkt | Bedeutung |
+|---|---|
+| `networks.<id>.armed` | Scharf (`true`) oder unscharf (`false`); ack erst, wenn Blink den neuen Zustand meldet |
+| `networks.<id>.armWithAll` | Das Netzwerk wird von `control.armSelected` scharf geschaltet. Eine Einstellung: bleibt, bis du sie änderst |
+| `control.armSelected` | Taster: schaltet die ausgewählten Netzwerke scharf |
+| `control.disarmAll` | Taster: schaltet alle Netzwerke unscharf |
+| `cameras.<id>.enabled` | Bewegungserkennung an/aus; ack erst, wenn Blink es meldet |
+| `cameras.<id>.snapshot` | Taster: neues Bild, gespeichert im Dateispeicher (`cameras.<id>.image`) |
+
+### Kamera-Seite
+Der Web-Adapter liefert eine Touch-Seite unter `http://<host>:<web-port>/blink/index.html`: alle Kameras nach Netzwerk,
+Bilder mit Alter, Scharf/Unscharf, Bewegungserkennung, neues Bild und Livebild.
+- `?view=all` (Standard) zeigt alle Netzwerke auf einer Seite, `?view=tabs` ein Netzwerk je Reiter.
+- `?pin=0_userdata.0.<pfad>` lässt das Unscharfschalten eine PIN abfragen, die ein Skript prüft: Die Seite schreibt
+  `kameras:<Netzwerk-ID>` nach `<pfad>.pinZiel`, die Eingabe nach `<pfad>.pinEingabe` und zeigt `<pfad>.meldung`.
+- Das Livebild braucht das eingeschaltete Livebild in den Einstellungen und eine Adresse, die der Browser erreicht
+  (nicht `127.0.0.1`); es geht nur, wenn die Seite über http geöffnet ist.
+
 ### Sicherheit
 Kameras zeigen private Bereiche. ioBroker-Admin und -Web nur mit Anmeldung und HTTPS erreichbar machen.
 Schwachstellen bitte wie in [SECURITY.md](SECURITY.md) beschrieben melden.
@@ -99,6 +137,9 @@ Schwachstellen bitte wie in [SECURITY.md](SECURITY.md) beschrieben melden.
 ### 0.1.0 (work in progress)
 - Complete rewrite in TypeScript: new object structure, the open proxy of 0.0.x is gone
 - Login with PKCE and 2FA (settings or sendTo), encrypted session, token refresh, no login loops
+- Arm/disarm with readback, snapshots, live view (pinned certificate of the stream servers)
+- Arm selected networks / disarm all, motion detection per camera with readback
+- Camera page for the web adapter (overview of all networks or tabs, optional PIN for disarming)
 
 ## License
 MIT License

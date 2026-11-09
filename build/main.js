@@ -34,6 +34,7 @@ var import_oauth = require("./lib/api/oauth");
 var import_rest = require("./lib/api/rest");
 var import_session_store = require("./lib/model/session-store");
 var import_arm_queue = require("./lib/model/arm-queue");
+var import_arm_selection = require("./lib/model/arm-selection");
 var import_image_store = require("./lib/model/image-store");
 var import_live_manager = require("./lib/model/live-manager");
 var import_snapshot_queue = require("./lib/model/snapshot-queue");
@@ -49,6 +50,8 @@ class Blink extends utils.Adapter {
   rest;
   tree;
   arm;
+  motion;
+  selection;
   images;
   snapshots;
   live;
@@ -98,6 +101,7 @@ class Blink extends utils.Adapter {
       common: { name: "Images of the cameras", type: "meta.user" },
       native: {}
     });
+    await this.createControlObjects();
     const origin = (0, import_config.testOrigin)(process.env[import_config.TEST_ORIGIN_ENV]);
     if (origin) {
       this.log.warn(`Test mode: all requests go to ${origin}`);
@@ -140,6 +144,59 @@ class Blink extends utils.Adapter {
       },
       this.tree
     );
+    const deviceOf = (cameraId) => {
+      var _a;
+      const device = (_a = this.homescreen) == null ? void 0 : _a.devices.find((item) => item.id === cameraId);
+      if ((device == null ? void 0 : device.networkId) === void 0) {
+        throw new Error("Blink does not report this camera or its network");
+      }
+      return { ...device, networkId: device.networkId };
+    };
+    this.motion = new import_arm_queue.ArmQueue(
+      {
+        online: () => this.cloudConnected,
+        send: (cameraId, enabled) => {
+          const device = deviceOf(cameraId);
+          return this.exclusive(
+            () => this.authorized(
+              (session) => this.rest.setMotion(session, device.networkId, device.kind, device.id, enabled)
+            )
+          );
+        },
+        commandStatus: (cameraId, commandId) => {
+          const { networkId } = deviceOf(cameraId);
+          return this.exclusive(
+            () => this.authorized((session) => this.rest.commandStatus(session, networkId, commandId))
+          );
+        },
+        read: async (cameraId) => {
+          var _a;
+          const homescreen = await this.exclusive(() => this.readCloud());
+          return (_a = homescreen.devices.find((device) => device.id === cameraId)) == null ? void 0 : _a.enabled;
+        },
+        wait: (ms) => this.delay(ms),
+        info: (message) => this.log.info(message),
+        warn: (message) => this.log.warn(message)
+      },
+      this.tree,
+      import_arm_queue.MOTION_SWITCH
+    );
+    this.selection = new import_arm_selection.ArmSelection({
+      readStored: async () => {
+        const stored = /* @__PURE__ */ new Map();
+        const states = await this.getStatesAsync(`networks.*.${import_arm_selection.SELECTION_KEY}`);
+        for (const [id, state] of Object.entries(states != null ? states : {})) {
+          const match = id.match(/\.networks\.(\d+)\.armWithAll$/);
+          if (match && state) {
+            stored.set(Number(match[1]), state.val);
+          }
+        }
+        return stored;
+      },
+      write: (networkId, value) => this.setState(`networks.${networkId}.${import_arm_selection.SELECTION_KEY}`, value, true),
+      request: (networkId, armed) => this.arm.request(networkId, armed),
+      info: (message) => this.log.info(message)
+    });
     const download = (thumbnail) => this.exclusive(() => this.authorized((session) => this.rest.downloadImage(session, thumbnail)));
     this.images = new import_image_store.ImageStore(
       {
@@ -220,6 +277,9 @@ class Blink extends utils.Adapter {
     );
     await this.subscribeStatesAsync("cameras.*.snapshot");
     await this.subscribeStatesAsync("networks.*.armed");
+    await this.subscribeStatesAsync("cameras.*.enabled");
+    await this.subscribeStatesAsync(`networks.*.${import_arm_selection.SELECTION_KEY}`);
+    await this.subscribeStatesAsync("control.*");
     await this.setLoginState("connecting");
     this.schedule(Math.floor(Math.random() * START_JITTER_MS), () => this.connect());
   }
@@ -484,6 +544,7 @@ class Blink extends utils.Adapter {
       throw new import_errors.AbortedError();
     }
     await this.tree.apply(homescreen);
+    await this.selection.ensure(homescreen.networks.map((network) => network.id));
     this.homescreen = homescreen;
     await this.setState("info.lastPoll", Date.now(), true);
     return homescreen;
@@ -514,6 +575,7 @@ class Blink extends utils.Adapter {
    * @param state - New state
    */
   onStateChange(id, state) {
+    var _a, _b;
     if (!state || state.ack || !this.arm) {
       return;
     }
@@ -523,16 +585,30 @@ class Blink extends utils.Adapter {
       this.onSnapshot(relative, Number(snapshot[1]), state);
       return;
     }
-    const match = relative.match(/^networks\.(\d+)\.armed$/);
-    if (!match) {
+    if (relative === import_arm_selection.CONTROL_IDS.armSelected || relative === import_arm_selection.CONTROL_IDS.disarmAll) {
+      this.onControl(relative, state);
       return;
     }
-    const networkId = Number(match[1]);
+    const motion = relative.match(/^cameras\.(\d+)\.enabled$/);
+    if (motion) {
+      this.onMotion(Number(motion[1]), state);
+      return;
+    }
+    const choice = relative.match(/^networks\.(\d+)\.armWithAll$/);
+    const match = relative.match(/^networks\.(\d+)\.armed$/);
+    const networkId = Number((_a = choice != null ? choice : match) == null ? void 0 : _a[1]);
     const fail = (err) => {
       if (!this.abort.signal.aborted) {
         this.log.error(`Network ${networkId}: ${(0, import_errors.describeError)(err)}`);
       }
     };
+    if (choice) {
+      (_b = this.selection) == null ? void 0 : _b.set(networkId, state.val).catch(fail);
+      return;
+    }
+    if (!match) {
+      return;
+    }
     if (typeof state.val === "boolean") {
       this.arm.request(networkId, state.val).catch(fail);
     } else {
@@ -557,6 +633,73 @@ class Blink extends utils.Adapter {
     (_a = this.tree) == null ? void 0 : _a.release(id, state.val).catch(fail);
     if (state.val) {
       (_b = this.snapshots) == null ? void 0 : _b.request(cameraId).catch(fail);
+    }
+  }
+  /**
+   * Motion detection of a device was switched. ack: true follows with the state read back from Blink.
+   *
+   * @param cameraId - Camera ID
+   * @param state - New state
+   */
+  onMotion(cameraId, state) {
+    var _a, _b;
+    const fail = (err) => {
+      if (!this.abort.signal.aborted) {
+        this.log.error(`Camera ${cameraId}: ${(0, import_errors.describeError)(err)}`);
+      }
+    };
+    if (typeof state.val === "boolean") {
+      (_a = this.motion) == null ? void 0 : _a.request(cameraId, state.val).catch(fail);
+    } else {
+      this.log.warn(`Camera ${cameraId}: "enabled" needs true or false`);
+      (_b = this.motion) == null ? void 0 : _b.restore(cameraId).catch(fail);
+    }
+  }
+  /**
+   * "Arm selected" or "disarm all" was pressed: confirmed at once, each network reports in armPending/armResult.
+   *
+   * @param id - Relative state ID
+   * @param state - New state
+   */
+  onControl(id, state) {
+    const command = id === import_arm_selection.CONTROL_IDS.armSelected ? "armSelected" : "disarmAll";
+    const fail = (err) => {
+      if (!this.abort.signal.aborted) {
+        this.log.error(`${command}: ${(0, import_errors.describeError)(err)}`);
+      }
+    };
+    this.setState(id, state.val, true).catch(fail);
+    if (state.val !== true) {
+      return;
+    }
+    if (!this.homescreen || !this.selection) {
+      this.log.warn(`${command}: not connected to Blink, command dropped`);
+      return;
+    }
+    const networks = this.homescreen.networks.map((network) => {
+      var _a;
+      const known = (_a = this.tree) == null ? void 0 : _a.value(`networks.${network.id}.armed`);
+      return { id: network.id, armed: typeof known === "boolean" ? known : network.armed };
+    });
+    this.selection.run(command, networks).catch(fail);
+  }
+  /** Commands for several networks; created here, as instanceObjects do not reach existing instances */
+  async createControlObjects() {
+    await this.extendObjectAsync("control", {
+      type: "channel",
+      common: { name: "Commands for several networks" },
+      native: {}
+    });
+    const buttons = [
+      [import_arm_selection.CONTROL_IDS.armSelected, "Arm the networks selected in networks.*.armWithAll"],
+      [import_arm_selection.CONTROL_IDS.disarmAll, "Disarm all networks"]
+    ];
+    for (const [id, name] of buttons) {
+      await this.extendObjectAsync(id, {
+        type: "state",
+        common: { name, type: "boolean", role: "button", read: false, write: true },
+        native: {}
+      });
     }
   }
   currentSession() {

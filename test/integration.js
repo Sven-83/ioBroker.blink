@@ -474,6 +474,99 @@ tests.integration(path.join(__dirname, '..'), {
             });
         });
 
+        suite('Arm selected networks', getHarness => {
+            let harness;
+            let cloud;
+            const press = id => harness.states.setState(`${NS}.control.${id}`, { val: true, ack: false });
+            const done = async (net, armed) =>
+                (await stateVal(harness, `networks.${net}.armPending`)) === false &&
+                (await stateVal(harness, `networks.${net}.armed`)) === armed;
+
+            before(async function () {
+                this.timeout(60_000);
+                harness = getHarness();
+                cloud = await startFakeBlink();
+                cloud.config.homescreen.networks.push({ id: 1002, name: 'Test Garden', armed: false });
+                await harness.changeAdapterConfig('blink', {
+                    native: { email: cloud.email, password: cloud.password, pin: '', pollInterval: 3600 },
+                });
+                await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
+                await waitFor(async () => (await stateVal(harness, 'info.connection')) === true, 'connected');
+            });
+
+            after(async () => {
+                await cloud?.close();
+            });
+
+            it('selects every new network and offers the two buttons', async function () {
+                this.timeout(10_000);
+                await waitFor(
+                    async () => (await stateVal(harness, 'networks.1002.armWithAll')) === true,
+                    'default choice',
+                );
+                expect((await harness.states.getState(`${NS}.networks.1001.armWithAll`)).ack).to.equal(true);
+                const button = await harness.objects.getObjectAsync(`${NS}.control.armSelected`);
+                expect(button.common.role).to.equal('button');
+                expect(button.common.write).to.equal(true);
+            });
+
+            it('keeps a changed choice', async function () {
+                this.timeout(10_000);
+                await harness.states.setState(`${NS}.networks.1002.armWithAll`, { val: false, ack: false });
+                await waitFor(async () => {
+                    const state = await harness.states.getState(`${NS}.networks.1002.armWithAll`);
+                    return state?.val === false && state.ack === true;
+                }, 'choice confirmed');
+            });
+
+            it('disarms every armed network', async function () {
+                this.timeout(20_000);
+                const before = cloud.stats.armNew;
+                await press('disarmAll');
+                await waitFor(() => done(1001, false), 'network 1001 disarmed', 15_000);
+                // 1002 was disarmed already: no command for it
+                expect(cloud.stats.armNew).to.equal(before + 1);
+            });
+
+            it('arms only the selected networks', async function () {
+                this.timeout(20_000);
+                const before = cloud.stats.armNew;
+                await press('armSelected');
+                await waitFor(() => done(1001, true), 'network 1001 armed', 15_000);
+                expect(await stateVal(harness, 'networks.1002.armed')).to.equal(false);
+                expect(cloud.stats.armNew).to.equal(before + 1);
+            });
+
+            it('switches the motion detection of a camera, ack only with the state read back', async function () {
+                this.timeout(20_000);
+                const ENABLED = `${NS}.cameras.3001.enabled`;
+                expect(await stateVal(harness, 'cameras.3001.enabled')).to.equal(true);
+                const object = await harness.objects.getObjectAsync(ENABLED);
+                expect(object.common.write).to.equal(true);
+                await harness.states.setState(ENABLED, { val: false, ack: false });
+                await waitFor(
+                    async () =>
+                        (await stateVal(harness, 'cameras.3001.motionPending')) === false &&
+                        (await stateVal(harness, 'cameras.3001.motionResult')) === 'confirmed',
+                    'motion detection confirmed',
+                    15_000,
+                );
+                const state = await harness.states.getState(ENABLED);
+                expect(state.val).to.equal(false);
+                expect(state.ack).to.equal(true);
+                expect(cloud.stats.motion).to.equal(1);
+            });
+
+            it('still has the choice after a restart', async function () {
+                this.timeout(60_000);
+                await harness.states.setState(`${NS}.info.lastPoll`, { val: 0, ack: true });
+                await restart(harness, { [ENV_KEY]: cloud.origin });
+                await waitFor(async () => (await stateVal(harness, 'info.lastPoll')) > 0, 'polled after restart');
+                expect(await stateVal(harness, 'networks.1002.armWithAll')).to.equal(false);
+                expect(await stateVal(harness, 'networks.1001.armWithAll')).to.equal(true);
+            });
+        });
+
         suite('Snapshots', getHarness => {
             let harness;
             let cloud;

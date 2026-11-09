@@ -147,6 +147,34 @@ class RestClient {
     );
   }
   /**
+   * Switches the motion detection of a device. Goes to the Sync Module, the camera is not woken.
+   * Cameras: current path of the app, the older one only if that path is unknown. Minis are switched through
+   * their settings, doorbells have one path.
+   *
+   * @param session - Logged-in session
+   * @param networkId - Network ID
+   * @param kind - Device family
+   * @param deviceId - Device ID
+   * @param enabled - Requested state
+   * @returns Command ID, if Blink gave one
+   */
+  setMotion(session, networkId, kind, deviceId, enabled) {
+    const action = enabled ? "enable" : "disable";
+    const account = `/api/v1/accounts/${session.accountId}/networks/${networkId}`;
+    const what = `Switching the motion detection ${enabled ? "on" : "off"}`;
+    if (kind === "mini") {
+      return this.command(session, [`${account}/owls/${deviceId}/config`], what, { enabled });
+    }
+    if (kind === "doorbell") {
+      return this.command(session, [`${account}/doorbells/${deviceId}/${action}`], what);
+    }
+    return this.command(
+      session,
+      [`${account}/cameras/${deviceId}/${action}`, `/network/${networkId}/camera/${deviceId}/${action}`],
+      what
+    );
+  }
+  /**
    * Asks Blink for a live session. This wakes a battery camera. Regular cameras use a newer version of the
    * path than Minis and doorbells; only the path of the device family is tried.
    *
@@ -223,15 +251,17 @@ class RestClient {
    * @param session - Logged-in session
    * @param paths - Paths to try, in this order
    * @param what - Action for the error message
+   * @param json - Body, if the command needs one
    * @returns Command ID, if Blink gave one
    */
-  async command(session, paths, what) {
+  async command(session, paths, what, json) {
     var _a;
     let response;
     for (const path of paths) {
       response = await this.http.request(`${session.restOrigin}${path}`, {
         method: "POST",
-        headers: { ...headers(session), "Content-Type": "application/json" }
+        headers: { ...headers(session), "Content-Type": "application/json" },
+        ...json ? { json } : {}
       });
       if (!UNKNOWN_PATH.includes(response.status)) {
         break;

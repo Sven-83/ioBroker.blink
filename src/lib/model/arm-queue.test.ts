@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import { AbortedError, ApiError, BusyError } from '../api/errors';
 import type { CommandStatus } from '../api/rest';
-import { ARM_READBACK_MS, ArmQueue, BUSY_RETRIES, COMMAND_POLL_MAX, type ArmHost } from './arm-queue';
+import { ARM_READBACK_MS, ArmQueue, BUSY_RETRIES, COMMAND_POLL_MAX, MOTION_SWITCH, type ArmHost } from './arm-queue';
 import { ObjectTree } from './tree';
 
 const NET = 7;
@@ -70,6 +70,26 @@ function setup(script: Script = {}): {
 function lastWrite(writes: [string, ioBroker.StateValue][], id: string): ioBroker.StateValue | undefined {
     return writes.filter(([written]) => written === id).at(-1)?.[1];
 }
+
+describe('model/arm-queue motion detection', () => {
+    it('switches the motion detection of a camera with the same readback', async () => {
+        const { tree, writes, host, messages } = setup({
+            send: [() => 12, () => 13],
+            status: ['done', 'failed'],
+            reads: [false, true],
+        });
+        const queue = new ArmQueue(host, tree, MOTION_SWITCH);
+        await queue.request(3, false);
+        expect(writes[0]).to.deep.equal(['cameras.3.motionPending', true]);
+        expect(lastWrite(writes, 'cameras.3.enabled')).to.equal(false);
+        expect(lastWrite(writes, 'cameras.3.motionResult')).to.equal('confirmed');
+        expect(lastWrite(writes, 'cameras.3.motionPending')).to.equal(false);
+        expect(messages).to.deep.include('Camera 3 motion detection is off');
+
+        await queue.request(3, false);
+        expect(messages.at(-1)).to.equal('Camera 3 motion detection: could not be switched off');
+    });
+});
 
 describe('model/arm-queue', () => {
     it('reports pending at once and confirms from the readback', async () => {

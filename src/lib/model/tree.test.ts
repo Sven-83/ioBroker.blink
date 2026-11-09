@@ -64,7 +64,9 @@ describe('model/tree', () => {
             'cameras.1.kind',
             'cameras.1.batteryLow',
             'cameras.1.temperature',
-            // states of the snapshots exist without a value from Blink
+            // states of the commands exist without a value from Blink
+            'cameras.1.motionPending',
+            'cameras.1.motionResult',
             'cameras.1.snapshot',
             'cameras.1.snapshotPending',
             'cameras.1.snapshotResult',

@@ -34,6 +34,8 @@ interface StateDef<T> {
     get?: (item: T) => ioBroker.StateValue | undefined;
     /** Value after the start of the adapter, for a state without polled value */
     initial?: ioBroker.StateValue;
+    /** Default value in the object (common.def) */
+    def?: ioBroker.StateValue;
 }
 
 const AVAILABLE_KEY = 'available';
@@ -61,6 +63,15 @@ const NETWORK_STATES: StateDef<BlinkNetwork>[] = [
         type: 'string',
         role: 'text',
         states: { confirmed: 'confirmed', rejected: 'rejected', unconfirmed: 'not confirmed' },
+    },
+    // a setting of the user: neither polled nor reset on start, see arm-selection.ts
+    {
+        key: 'armWithAll',
+        name: 'Armed by "arm selected"',
+        type: 'boolean',
+        role: 'switch.enable',
+        write: true,
+        def: true,
     },
 ];
 
@@ -92,7 +103,28 @@ const DEVICE_STATES: StateDef<BlinkDevice>[] = [
     { key: 'networkId', name: 'Network ID', type: 'number', role: 'info', get: item => item.networkId },
     { key: 'serial', name: 'Serial number', type: 'string', role: 'info.serial', get: item => item.serial },
     { key: 'status', name: 'Status', type: 'string', role: 'info.status', get: item => item.status },
-    { key: 'enabled', name: 'Motion detection enabled', type: 'boolean', role: 'indicator', get: item => item.enabled },
+    {
+        key: 'enabled',
+        name: 'Motion detection enabled',
+        type: 'boolean',
+        role: 'switch.enable',
+        write: true,
+        get: item => item.enabled,
+    },
+    {
+        key: 'motionPending',
+        name: 'Motion detection command running',
+        type: 'boolean',
+        role: 'indicator.working',
+        initial: false,
+    },
+    {
+        key: 'motionResult',
+        name: 'Result of the last motion detection command',
+        type: 'string',
+        role: 'text',
+        states: { confirmed: 'confirmed', rejected: 'rejected', unconfirmed: 'not confirmed' },
+    },
     { key: 'batteryLow', name: 'Battery low', type: 'boolean', role: 'indicator.lowbat', get: item => item.batteryLow },
     { key: 'batteryLevel', name: 'Battery bars', type: 'number', role: 'value', get: item => item.batteryLevel },
     {
@@ -219,6 +251,7 @@ export class ObjectTree {
                         write: def.write ?? false,
                         ...(def.unit ? { unit: def.unit } : {}),
                         ...(def.states ? { states: def.states } : {}),
+                        ...(def.def !== undefined ? { def: def.def } : {}),
                     },
                     native: {},
                 });

@@ -24,6 +24,8 @@ __export(arm_queue_exports, {
   BUSY_RETRY_MS: () => BUSY_RETRY_MS,
   COMMAND_POLL_MAX: () => COMMAND_POLL_MAX,
   COMMAND_POLL_MS: () => COMMAND_POLL_MS,
+  MOTION_SWITCH: () => MOTION_SWITCH,
+  NETWORK_SWITCH: () => NETWORK_SWITCH,
   armIds: () => armIds
 });
 module.exports = __toCommonJS(arm_queue_exports);
@@ -37,14 +39,32 @@ function armIds(networkId) {
   const base = `networks.${networkId}`;
   return { armed: `${base}.armed`, pending: `${base}.armPending`, result: `${base}.armResult` };
 }
+const NETWORK_SWITCH = {
+  ids: armIds,
+  subject: (id) => `Network ${id}`,
+  words: ["disarmed", "armed"],
+  actions: ["disarmed", "armed"]
+};
+const MOTION_SWITCH = {
+  ids: (id) => ({
+    armed: `cameras.${id}.enabled`,
+    pending: `cameras.${id}.motionPending`,
+    result: `cameras.${id}.motionResult`
+  }),
+  subject: (id) => `Camera ${id} motion detection`,
+  words: ["off", "on"],
+  actions: ["switched off", "switched on"]
+};
 class ArmQueue {
   /**
    * @param host - Adapter functions
    * @param tree - Object tree
+   * @param spec - What is switched, networks by default
    */
-  constructor(host, tree) {
+  constructor(host, tree, spec = NETWORK_SWITCH) {
     this.host = host;
     this.tree = tree;
+    this.spec = spec;
   }
   networks = /* @__PURE__ */ new Map();
   /**
@@ -70,13 +90,13 @@ class ArmQueue {
    */
   async restore(networkId) {
     if (!this.networks.has(networkId)) {
-      const { armed } = armIds(networkId);
+      const { armed } = this.spec.ids(networkId);
       await this.tree.release(armed, this.known(armed));
     }
   }
   async drain(networkId, entry) {
     var _a;
-    const ids = armIds(networkId);
+    const ids = this.spec.ids(networkId);
     this.tree.hold(ids.armed);
     try {
       await this.tree.setValue(ids.pending, true);
@@ -103,9 +123,9 @@ class ArmQueue {
   }
   async execute(networkId, armed, entry) {
     var _a, _b;
-    const known = this.known(armIds(networkId).armed);
+    const known = this.known(this.spec.ids(networkId).armed);
     if (!this.host.online()) {
-      this.host.warn(`Network ${networkId}: not connected to Blink, command dropped`);
+      this.host.warn(`${this.spec.subject(networkId)}: not connected to Blink, command dropped`);
       return { result: "rejected", actual: known };
     }
     let commandId;
@@ -115,7 +135,7 @@ class ArmQueue {
       if (err instanceof import_errors.AbortedError) {
         throw err;
       }
-      this.host.warn(`Network ${networkId}: command failed: ${(0, import_errors.describeError)(err)}`);
+      this.host.warn(`${this.spec.subject(networkId)}: command failed: ${(0, import_errors.describeError)(err)}`);
       const actual2 = await this.read(networkId);
       return { result: actual2 === armed ? "confirmed" : "rejected", actual: actual2 != null ? actual2 : known };
     }
@@ -176,7 +196,7 @@ class ArmQueue {
         if (err instanceof import_errors.AbortedError) {
           throw err;
         }
-        this.host.info(`Network ${networkId}: command status not available: ${(0, import_errors.describeError)(err)}`);
+        this.host.info(`${this.spec.subject(networkId)}: command status not available: ${(0, import_errors.describeError)(err)}`);
         return "running";
       }
     }
@@ -189,7 +209,7 @@ class ArmQueue {
       if (err instanceof import_errors.AbortedError) {
         throw err;
       }
-      this.host.info(`Network ${networkId}: readback failed: ${(0, import_errors.describeError)(err)}`);
+      this.host.info(`${this.spec.subject(networkId)}: readback failed: ${(0, import_errors.describeError)(err)}`);
       return void 0;
     }
   }
@@ -198,13 +218,14 @@ class ArmQueue {
     return typeof value === "boolean" ? value : void 0;
   }
   report(networkId, armed, result) {
-    const target = armed ? "armed" : "disarmed";
+    const target = this.spec.words[armed ? 1 : 0];
+    const subject = this.spec.subject(networkId);
     if (result === "confirmed") {
-      this.host.info(`Network ${networkId} is ${target}`);
+      this.host.info(`${subject} is ${target}`);
     } else if (result === "unconfirmed") {
-      this.host.warn(`Network ${networkId}: Blink has not confirmed the change to ${target}`);
+      this.host.warn(`${subject}: Blink has not confirmed the change to ${target}`);
     } else {
-      this.host.warn(`Network ${networkId}: could not be ${target}`);
+      this.host.warn(`${subject}: could not be ${this.spec.actions[armed ? 1 : 0]}`);
     }
   }
 }
@@ -216,6 +237,8 @@ class ArmQueue {
   BUSY_RETRY_MS,
   COMMAND_POLL_MAX,
   COMMAND_POLL_MS,
+  MOTION_SWITCH,
+  NETWORK_SWITCH,
   armIds
 });
 //# sourceMappingURL=arm-queue.js.map

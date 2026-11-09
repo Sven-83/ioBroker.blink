@@ -166,6 +166,34 @@ describe('api/rest', () => {
         ]);
     });
 
+    it('switches the motion detection of each device family over its own path', async () => {
+        expect(await rest.setMotion(session, 1001, 'camera', 3001, false)).to.be.a('number');
+        await rest.setMotion(session, 1001, 'mini', 3002, true);
+        await rest.setMotion(session, 1001, 'doorbell', 3003, false);
+        const account = `/api/v1/accounts/${cloud.accountId}/networks/1001`;
+        const calls = cloud.requests.filter(item => /\/(enable|disable|config)$/.test(item.path));
+        expect(calls.map(item => item.path)).to.deep.equal([
+            `${account}/cameras/3001/disable`,
+            `${account}/owls/3002/config`,
+            `${account}/doorbells/3003/disable`,
+        ]);
+        expect(JSON.parse(calls[1].body)).to.deep.equal({ enabled: true });
+        const homescreen = await rest.homescreen(session);
+        expect(homescreen.devices.map(device => device.enabled)).to.deep.equal([false, true, false]);
+    });
+
+    it('switches a camera over the older path only if the current one is unknown', async () => {
+        cloud.config.motionNewPathStatus = 404;
+        await rest.setMotion(session, 1001, 'camera', 3001, false);
+        expect(cloud.requests.some(item => item.path === '/network/1001/camera/3001/disable')).to.equal(true);
+        cloud.config.motionNewPathStatus = 500;
+        const before = cloud.stats.motion;
+        expect(((await rejection(rest.setMotion(session, 1001, 'camera', 3001, true))) as ApiError).status).to.equal(
+            500,
+        );
+        expect(cloud.stats.motion, 'no second path after any other error').to.equal(before + 1);
+    });
+
     it('returns the command ID of a snapshot and recognises a busy system', async () => {
         expect(await rest.snapshot(session, 1001, 'camera', 3001)).to.be.a('number');
         cloud.config.snapshotBusyCount = 1;

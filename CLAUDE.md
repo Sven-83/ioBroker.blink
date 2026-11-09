@@ -1,11 +1,11 @@
 # CLAUDE.md – ioBroker.blink
 
 ## Projekt
-ioBroker-Adapter für Blink-Kameras über die **inoffizielle** Blink-Cloud-API. Neufassung in TypeScript (Branch `ts-rewrite`), Plan und Vergleich im lokalen Arbeitsordner (`../PLAN.md`, `../VERGLEICH.md`), Spec in Claude-Specs `blink.md`.
+ioBroker-Adapter für Blink-Kameras über die **inoffizielle** Blink-Cloud-API. Neufassung in TypeScript (nur Branch `main`, Historie am 09.11.2026 bereinigt), Plan und Vergleich im lokalen Arbeitsordner (`../PLAN.md`, `../VERGLEICH.md`), Spec in Claude-Specs `blink.md`.
 
 - **Adaptername:** `blink` (ersetzt auf dem Pi den gleichnamigen Adapter von Pischleuder1)
 - **Installation:** `iob url Sven-83/ioBroker.blink` aus `main`. Keine Releases, keine Tags, kein npm.
-- **Autor-Mail** überall nur `276080681+Sven-83@users.noreply.github.com` (lokale git-Config gesetzt, pre-commit-Hook blockt andere Adressen). Alte Commits enthalten die private Adresse – Historie nicht umschreiben ohne Rückfrage.
+- **Autor-Mail** überall nur `276080681+Sven-83@users.noreply.github.com` (lokale git-Config gesetzt, pre-commit-Hook blockt andere Adressen). Die Historie ist bereinigt; alte Kopien mit der alten Historie nie pushen.
 - **Sprache:** TypeScript strict, Node ≥ 22, js-controller ≥ 6.0.11, admin ≥ 7.6.20.
 
 ## Referenz

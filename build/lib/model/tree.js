@@ -44,6 +44,15 @@ const NETWORK_STATES = [
     type: "string",
     role: "text",
     states: { confirmed: "confirmed", rejected: "rejected", unconfirmed: "not confirmed" }
+  },
+  // a setting of the user: neither polled nor reset on start, see arm-selection.ts
+  {
+    key: "armWithAll",
+    name: 'Armed by "arm selected"',
+    type: "boolean",
+    role: "switch.enable",
+    write: true,
+    def: true
   }
 ];
 const SYNC_STATES = [
@@ -73,7 +82,28 @@ const DEVICE_STATES = [
   { key: "networkId", name: "Network ID", type: "number", role: "info", get: (item) => item.networkId },
   { key: "serial", name: "Serial number", type: "string", role: "info.serial", get: (item) => item.serial },
   { key: "status", name: "Status", type: "string", role: "info.status", get: (item) => item.status },
-  { key: "enabled", name: "Motion detection enabled", type: "boolean", role: "indicator", get: (item) => item.enabled },
+  {
+    key: "enabled",
+    name: "Motion detection enabled",
+    type: "boolean",
+    role: "switch.enable",
+    write: true,
+    get: (item) => item.enabled
+  },
+  {
+    key: "motionPending",
+    name: "Motion detection command running",
+    type: "boolean",
+    role: "indicator.working",
+    initial: false
+  },
+  {
+    key: "motionResult",
+    name: "Result of the last motion detection command",
+    type: "string",
+    role: "text",
+    states: { confirmed: "confirmed", rejected: "rejected", unconfirmed: "not confirmed" }
+  },
   { key: "batteryLow", name: "Battery low", type: "boolean", role: "indicator.lowbat", get: (item) => item.batteryLow },
   { key: "batteryLevel", name: "Battery bars", type: "number", role: "value", get: (item) => item.batteryLevel },
   {
@@ -191,7 +221,8 @@ class ObjectTree {
             read: (_a = def.read) != null ? _a : true,
             write: (_b = def.write) != null ? _b : false,
             ...def.unit ? { unit: def.unit } : {},
-            ...def.states ? { states: def.states } : {}
+            ...def.states ? { states: def.states } : {},
+            ...def.def !== void 0 ? { def: def.def } : {}
           },
           native: {}
         });

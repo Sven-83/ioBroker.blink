@@ -1,0 +1,759 @@
+/*
+ * Blink camera page - "Jäger" design like the climate page of melhome: same colours and fonts,
+ * made for an iframe of about 1050 x 575 px on a touch tablet (buttons at least 40 px high).
+ * Fonts: Fraunces and Work Sans (SIL OFL 1.1, see fonts/).
+ */
+@font-face {
+    font-family: 'Fraunces';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(fonts/fraunces.woff2) format('woff2-variations'), url(fonts/fraunces.woff2) format('woff2');
+}
+@font-face {
+    font-family: 'Work Sans';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url(fonts/work-sans.woff2) format('woff2-variations'), url(fonts/work-sans.woff2) format('woff2');
+}
+:root {
+    --bg-deep: #101a14;
+    --bg-panel: #1a2a20;
+    --bg-button: #1d2e20;
+    --border-brass: #3c4f38;
+    --border-button: #5b7052;
+    --border-brass-lit: #8a7248;
+    --text-parchment: #e9e2d0;
+    --text-dim: #b4bfab;
+    --text-faint: #7d8a76;
+    --amber: #c98a3e;
+    --amber-bright: #e0a758;
+    --ember: #c9552c;
+    --moss-good: #7ea15f;
+    --alert: #b3492f;
+    --on-accent: #101a14;
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+* {
+    box-sizing: border-box;
+}
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background:
+        radial-gradient(ellipse at 20% -10%, #1e3225 0%, transparent 55%),
+        radial-gradient(ellipse at 100% 110%, #16261b 0%, transparent 50%),
+        var(--bg-deep);
+    color: var(--text-parchment);
+    font-family: 'Work Sans', sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.wrap {
+    height: 100%;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.hidden {
+    display: none !important;
+}
+[role='button'],
+[role='switch'],
+[role='tab'] {
+    cursor: pointer;
+}
+:focus-visible {
+    outline: 2px solid var(--amber-bright);
+    outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- messages */
+.banner,
+.cloud,
+.empty {
+    display: none;
+    font-size: 14px;
+}
+.banner.show {
+    display: block;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: #3a1d1f;
+    border: 1px solid var(--alert);
+}
+.cloud.show {
+    display: block;
+    color: var(--amber-bright);
+}
+.empty.show {
+    display: block;
+    margin: 40px auto;
+    color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- tabs */
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 0 16px;
+    border-radius: 12px;
+    background: var(--bg-button);
+    border: 1px solid var(--border-brass);
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 15px;
+}
+.tab.active {
+    background: var(--amber);
+    border-color: var(--amber-bright);
+    color: var(--on-accent);
+}
+.tab-count {
+    font-size: 12px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.25);
+}
+.net-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0.7;
+}
+.net-dot.armed {
+    border-color: var(--ember);
+    background: var(--ember);
+    opacity: 1;
+    animation: glow 2.6s ease-in-out infinite;
+}
+
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+}
+.view-toggle {
+    min-height: 36px;
+}
+
+/* ---------------------------------------------------------------- sections (one per network) */
+.sections {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.net {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.net-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, var(--bg-panel) 0%, #16241b 100%);
+    border: 1px solid var(--border-brass);
+}
+.net.armed .net-head {
+    border-color: var(--border-brass-lit);
+}
+.net-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.net-title .net-dot {
+    color: var(--moss-good);
+}
+.head-buttons {
+    display: flex;
+    gap: 8px;
+}
+.net-name {
+    font-family: 'Fraunces', serif;
+    font-size: 22px;
+    font-weight: 600;
+}
+.net-sub {
+    font-size: 13px;
+    color: var(--text-dim);
+}
+.net-state {
+    font-weight: 700;
+    color: var(--moss-good);
+}
+.net-state.armed {
+    color: var(--ember);
+}
+.net-state.pending {
+    color: var(--amber-bright);
+    animation: pulse 0.9s ease-in-out infinite;
+}
+.net-result {
+    color: var(--amber-bright);
+}
+.head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    background: var(--bg-button);
+    border: 1px solid var(--border-button);
+    color: var(--text-parchment);
+    white-space: nowrap;
+}
+.btn:active {
+    transform: scale(0.97);
+}
+.btn.disabled {
+    opacity: 0.45;
+    pointer-events: none;
+}
+.btn-arm {
+    background: var(--ember);
+    border-color: var(--ember);
+    color: #fff;
+}
+.btn-disarm {
+    background: var(--bg-button);
+    border-color: var(--moss-good);
+    color: var(--moss-good);
+}
+.with-all {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+}
+.switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: #2a3a2d;
+    border: 1px solid var(--border-button);
+    transition: background 0.25s;
+}
+.knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: transform 0.25s;
+}
+.with-all.on .switch {
+    background: var(--amber);
+    border-color: var(--amber-bright);
+}
+.with-all.on .knob {
+    transform: translateX(18px);
+    background: var(--on-accent);
+}
+.with-all.on {
+    color: var(--text-parchment);
+}
+
+/* ---------------------------------------------------------------- cameras */
+.net-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 10px;
+    align-content: start;
+    padding-bottom: 4px;
+}
+.card {
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    overflow: hidden;
+    background: linear-gradient(180deg, var(--bg-panel) 0%, #16241b 100%);
+    border: 1px solid var(--border-brass);
+    box-shadow: var(--shadow);
+}
+.card.offline {
+    border-color: #5a2a22;
+}
+.cam-img {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: #0c140f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.cam-img img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.4s;
+}
+.cam-img img.loaded {
+    opacity: 1;
+}
+.card.offline .cam-img img {
+    filter: grayscale(0.8);
+    opacity: 0.6;
+}
+.cam-placeholder {
+    width: 34px;
+    height: 34px;
+    color: var(--text-faint);
+}
+.cam-age {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.cam-motion {
+    position: absolute;
+    right: 6px;
+    top: 6px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(16, 26, 20, 0.82);
+    border: 1px solid var(--amber);
+    color: var(--amber-bright);
+    transition:
+        color 0.3s,
+        border-color 0.3s;
+}
+.cam-motion svg {
+    width: 20px;
+    height: 20px;
+}
+.cam-motion .slash {
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+.cam-motion.off {
+    border-color: var(--border-button);
+    color: var(--text-faint);
+}
+.cam-motion.off .slash {
+    opacity: 1;
+    stroke: var(--text-dim);
+}
+.cam-motion.pending {
+    animation: pulse 0.9s ease-in-out infinite;
+    pointer-events: none;
+}
+.view-all .cam-motion {
+    width: 28px;
+    height: 28px;
+}
+.view-all .cam-motion svg {
+    width: 17px;
+    height: 17px;
+}
+.cam-spinner {
+    display: none;
+    position: absolute;
+    left: calc(50% - 11px);
+    top: calc(50% - 11px);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2.5px solid var(--amber-bright);
+    border-right-color: transparent;
+    animation: spin 0.9s linear infinite;
+}
+.card.pending .cam-spinner {
+    display: block;
+}
+.card.pending .cam-img img {
+    animation: pulse 1.6s ease-in-out infinite;
+}
+.cam-result {
+    display: none;
+    position: absolute;
+    right: 44px;
+    top: 9px;
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: rgba(16, 26, 20, 0.85);
+    border: 1px solid var(--border-brass-lit);
+    color: var(--amber-bright);
+}
+.cam-result.show {
+    display: block;
+}
+.cam-name {
+    padding: 6px 10px 2px;
+    font-weight: 600;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cam-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 8px 8px 10px;
+}
+.cam-badges {
+    position: absolute;
+    left: 6px;
+    top: 6px;
+    right: 42px;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border-brass);
+    background: rgba(16, 26, 20, 0.85);
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.badge-offline {
+    border-color: var(--alert);
+    color: #f0a08c;
+}
+.badge-batteryLow {
+    border-color: var(--amber);
+    color: var(--amber-bright);
+}
+.cam-buttons {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.cam-buttons .btn {
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 13px;
+}
+.btn-live {
+    border-color: var(--border-brass-lit);
+    color: var(--amber-bright);
+}
+
+/* ---------------------------------------------------------------- overview: every network as a band */
+/* sizes in line with OVERVIEW in js/app.js: head 178 px wide and at least 126 px high, gap 8, strip 36 */
+.view-all .sections {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-x: hidden;
+}
+.view-all .net {
+    display: grid;
+    grid-template-columns: 178px 1fr;
+    gap: 8px;
+    align-items: stretch;
+}
+.view-all .net-head {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 6px;
+    min-height: 126px;
+    padding: 8px 10px;
+}
+.view-all .net-name {
+    font-size: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.view-all .net-sub {
+    font-size: 12px;
+}
+.view-all .head-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+.view-all .with-all {
+    min-height: 30px;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1.2;
+}
+.view-all .switch {
+    flex-shrink: 0;
+}
+.view-all .head-buttons .btn {
+    flex: 1;
+    min-height: 34px;
+    padding: 0 6px;
+    font-size: 12px;
+}
+.view-all .net-grid {
+    grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
+    gap: 8px;
+    padding-bottom: 0;
+}
+.view-all .card {
+    box-shadow: none;
+}
+.view-all .cam-name {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 36px;
+    padding: 14px 7px 4px;
+    font-size: 12px;
+    background: linear-gradient(180deg, transparent, rgba(5, 10, 7, 0.88));
+    pointer-events: none;
+}
+.view-all .card {
+    position: relative;
+}
+.view-all .cam-foot {
+    height: 36px;
+    padding: 4px 6px;
+    gap: 4px;
+}
+.view-all .cam-age {
+    font-size: 10px;
+}
+.view-all .cam-buttons {
+    gap: 4px;
+}
+.view-all .cam-buttons .btn {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
+}
+.view-all .badge {
+    font-size: 9px;
+    padding: 1px 4px;
+}
+
+/* ---------------------------------------------------------------- overlays */
+.overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: rgba(5, 10, 7, 0.86);
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+}
+.overlay.show {
+    display: flex;
+}
+.live-box {
+    width: min(100%, 980px);
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.live-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: 'Fraunces', serif;
+    font-size: 20px;
+    font-weight: 600;
+}
+.close {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    background: var(--bg-button);
+    border: 1px solid var(--border-button);
+}
+.live-frame {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    max-height: calc(100vh - 90px);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid var(--border-brass);
+}
+.live-frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.live-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    color: var(--text-dim);
+    pointer-events: none;
+}
+.live-status:empty {
+    display: none;
+}
+.pin-box {
+    width: 300px;
+    padding: 18px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, var(--bg-panel) 0%, #16241b 100%);
+    border: 1px solid var(--border-brass-lit);
+    box-shadow: var(--shadow);
+    text-align: center;
+}
+.pin-title {
+    font-family: 'Fraunces', serif;
+    font-size: 19px;
+    font-weight: 600;
+}
+.pin-hint {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 2px;
+}
+.pin-dots {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin: 14px 0 6px;
+}
+.pin-dots span {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border-button);
+}
+.pin-dots span.filled {
+    background: var(--amber-bright);
+    border-color: var(--amber-bright);
+}
+.pin-message {
+    min-height: 20px;
+    font-size: 13px;
+    color: var(--amber-bright);
+}
+.pin-pad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 6px;
+}
+.pin-key {
+    height: 52px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 600;
+    background: var(--bg-button);
+    border: 1px solid var(--border-button);
+}
+.pin-key:active {
+    background: var(--amber);
+    color: var(--on-accent);
+}
+.key-close,
+.key-del {
+    font-size: 18px;
+    color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- motion */
+@keyframes glow {
+    0%,
+    100% {
+        box-shadow: 0 0 0 rgba(201, 85, 44, 0);
+    }
+    50% {
+        box-shadow: 0 0 8px rgba(201, 85, 44, 0.9);
+    }
+}
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.45;
+    }
+}
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+@media (max-width: 700px) {
+    .head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .head-actions {
+        justify-content: flex-start;
+    }
+}
