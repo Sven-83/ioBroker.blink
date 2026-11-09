@@ -97,6 +97,8 @@ export interface LiveHost {
     maxMs(): number;
     /** Log message on level debug */
     debug(message: string): void;
+    /** Log message on level info: start, first image and end of a session, so they are known without debug */
+    info(message: string): void;
     /** Log message on level warn */
     warn(message: string): void;
 }
@@ -309,6 +311,7 @@ export class LiveManager {
             noFrame: undefined,
         };
         this.session = session;
+        this.host.info(`Camera ${session.cameraId}: live image started, waiting for the first image`);
 
         const process = this.host.spawnFfmpeg(ffmpegArgs(Math.ceil(maxMs / 1000)));
         session.process = process;
@@ -361,7 +364,7 @@ export class LiveManager {
         if (!session.firstFrame) {
             session.firstFrame = true;
             this.host.clearTimer(session.noFrame);
-            this.host.debug(`Camera ${session.cameraId}: first live image after ${Date.now() - session.started} ms`);
+            this.host.info(`Camera ${session.cameraId}: first live image after ${Date.now() - session.started} ms`);
         }
         this.server.broadcast(frame);
     }
@@ -422,7 +425,7 @@ export class LiveManager {
         await this.server.stop();
         await this.tree.setValue(`cameras.${session.cameraId}.liveActive`, false);
         await this.tree.setValue(`cameras.${session.cameraId}.liveResult`, result);
-        this.host.debug(
+        this.host.info(
             `Camera ${session.cameraId}: live image ended after ${Date.now() - session.started} ms: ${result}`,
         );
         if (session.commandId !== undefined) {

@@ -302,6 +302,7 @@ class Blink extends utils.Adapter {
                 listen: () => ({ host: liveBindAddress(this.config.liveBind), port: livePort(this.config.livePort) }),
                 maxMs: () => liveMaxSeconds(this.config.liveMaxSeconds) * 1000,
                 debug: message => this.log.debug(message),
+                info: message => this.log.info(message),
                 warn: message => this.log.warn(message),
             },
             this.tree,

@@ -193,6 +193,7 @@ class LiveManager {
       noFrame: void 0
     };
     this.session = session;
+    this.host.info(`Camera ${session.cameraId}: live image started, waiting for the first image`);
     const process = this.host.spawnFfmpeg(ffmpegArgs(Math.ceil(maxMs / 1e3)));
     session.process = process;
     const splitter = new import_mjpeg.FrameSplitter();
@@ -240,7 +241,7 @@ class LiveManager {
     if (!session.firstFrame) {
       session.firstFrame = true;
       this.host.clearTimer(session.noFrame);
-      this.host.debug(`Camera ${session.cameraId}: first live image after ${Date.now() - session.started} ms`);
+      this.host.info(`Camera ${session.cameraId}: first live image after ${Date.now() - session.started} ms`);
     }
     this.server.broadcast(frame);
   }
@@ -293,7 +294,7 @@ class LiveManager {
     await this.server.stop();
     await this.tree.setValue(`cameras.${session.cameraId}.liveActive`, false);
     await this.tree.setValue(`cameras.${session.cameraId}.liveResult`, result);
-    this.host.debug(
+    this.host.info(
       `Camera ${session.cameraId}: live image ended after ${Date.now() - session.started} ms: ${result}`
     );
     if (session.commandId !== void 0) {

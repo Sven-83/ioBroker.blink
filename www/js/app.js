@@ -557,11 +557,13 @@
         if (live) {
             return;
         }
-        live = { cameraId: camera.id, url: '' };
+        live = { cameraId: camera.id, url: '', started: Date.now(), ticker: 0 };
         $('live-name').textContent = camera.name;
-        $('live-status').textContent = C.t(lang, 'liveStarting');
         $('live-img').removeAttribute('src');
         $('live').classList.add('show');
+        // a camera that has to wake up can take half a minute: the counter shows that something is happening
+        liveTick();
+        live.ticker = window.setInterval(liveTick, 1000);
         const access = await sendTo('liveStart', { cameraId: camera.id });
         if (!live || live.cameraId !== camera.id) {
             // closed while starting
@@ -581,12 +583,30 @@
             return;
         }
         live.url = url;
-        $('live-status').textContent = C.t(lang, 'liveWaiting');
-        $('live-img').onload = () => ($('live-status').textContent = '');
+        liveTick();
+        $('live-img').onload = () => {
+            stopTicker();
+            $('live-status').textContent = '';
+        };
         $('live-img').src = url;
     }
 
+    function liveTick() {
+        if (live) {
+            const seconds = Math.floor((Date.now() - live.started) / 1000);
+            $('live-status').textContent = `${C.t(lang, live.url ? 'liveWaiting' : 'liveStarting')} ${seconds} s`;
+        }
+    }
+
+    function stopTicker() {
+        if (live && live.ticker) {
+            window.clearInterval(live.ticker);
+            live.ticker = 0;
+        }
+    }
+
     function endLive(text) {
+        stopTicker();
         $('live-img').removeAttribute('src');
         if (live) {
             live.url = '';
@@ -598,6 +618,7 @@
         if (!live) {
             return;
         }
+        stopTicker();
         const { cameraId, url } = live;
         live = null;
         $('live-img').removeAttribute('src');

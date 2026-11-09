@@ -164,6 +164,7 @@ function setup(script: Script = {}): {
         listen: () => ({ host: '127.0.0.1', port: 0 }),
         maxMs: () => 120_000,
         debug: message => messages.push(message),
+        info: message => messages.push(message),
         warn: message => messages.push(message),
     };
     return {
