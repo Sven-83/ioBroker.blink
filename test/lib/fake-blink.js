@@ -80,6 +80,11 @@ function defaultHomescreen() {
  * @param {number} [options.expiresIn] - Lifetime of access tokens in seconds
  * @param {number} [options.homescreenStatus] - HTTP status of the homescreen (other than 200: error answer)
  * @param {unknown} [options.homescreen] - Answer of the homescreen
+ * @param {number} [options.armNewPathStatus] - HTTP status of the current arm path (other than 200: error answer)
+ * @param {number} [options.armBusyCount] - Number of arm requests answered with "System is busy"
+ * @param {number} [options.armDelayMs] - Time until a command is finished and "armed" changes
+ * @param {boolean} [options.armIgnored] - Commands are accepted, but "armed" never changes
+ * @param {boolean} [options.armCommandFails] - Commands report a failure, "armed" does not change
  */
 async function startFakeBlink(options = {}) {
     const config = {
@@ -88,8 +93,15 @@ async function startFakeBlink(options = {}) {
         expiresIn: 14_400,
         homescreenStatus: 200,
         homescreen: defaultHomescreen(),
+        armNewPathStatus: 200,
+        armBusyCount: 0,
+        armDelayMs: 0,
+        armIgnored: false,
+        armCommandFails: false,
         ...options,
     };
+    const commands = new Map(); // id -> { doneAt, failed }
+    let nextCommandId = 900;
     const sessions = new Map(); // sid -> { challenge, csrf, authenticated, awaiting2fa }
     const codes = new Map(); // code -> challenge
     const accessTokens = new Set();
@@ -105,6 +117,35 @@ async function startFakeBlink(options = {}) {
         tierInfo: 0,
         homescreen: 0,
         homescreenRequests: 0,
+        armNew: 0,
+        armOld: 0,
+        commandStatus: 0,
+    };
+
+    /** Accepts a command and changes "armed" as configured */
+    const acceptArm = (res, networkId, action) => {
+        const network = config.homescreen.networks?.find(item => item.id === networkId);
+        if (!network) {
+            return send(res, 404, { message: 'unknown network' });
+        }
+        if (config.armBusyCount > 0) {
+            config.armBusyCount--;
+            return send(res, 409, { message: 'System is busy' });
+        }
+        const id = ++nextCommandId;
+        const failed = config.armCommandFails;
+        commands.set(id, { doneAt: Date.now() + config.armDelayMs, failed });
+        if (!failed && !config.armIgnored) {
+            const apply = () => {
+                network.armed = action === 'arm';
+            };
+            if (config.armDelayMs > 0) {
+                setTimeout(apply, config.armDelayMs).unref();
+            } else {
+                apply();
+            }
+        }
+        return send(res, 200, { id, network_id: networkId, state: 'new' });
     };
     const requests = [];
 
@@ -257,6 +298,38 @@ async function startFakeBlink(options = {}) {
             }
             stats.homescreen++;
             return send(res, 200, config.homescreen);
+        }
+
+        const armNew = url.pathname.match(
+            new RegExp(`^/api/v1/accounts/${ACCOUNT_ID}/networks/(\\d+)/state/(arm|disarm)$`),
+        );
+        const armOld = url.pathname.match(/^\/network\/(\d+)\/(arm|disarm)$/);
+        if (req.method === 'POST' && (armNew || armOld)) {
+            stats[armNew ? 'armNew' : 'armOld']++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            if (armNew && config.armNewPathStatus !== 200) {
+                return send(res, config.armNewPathStatus, { message: 'error' });
+            }
+            const match = armNew ?? armOld;
+            return acceptArm(res, Number(match[1]), match[2]);
+        }
+
+        const commandPath = url.pathname.match(/^\/network\/\d+\/command\/(\d+)$/);
+        if (req.method === 'GET' && commandPath) {
+            stats.commandStatus++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            const command = commands.get(Number(commandPath[1]));
+            if (!command) {
+                return send(res, 404, { message: 'unknown command' });
+            }
+            if (command.failed) {
+                return send(res, 200, { complete: false, status: 2102, status_msg: 'failed' });
+            }
+            return send(res, 200, { complete: Date.now() >= command.doneAt, status: 0, status_msg: 'ok' });
         }
 
         send(res, 404, { message: 'not found' });

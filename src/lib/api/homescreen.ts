@@ -83,7 +83,12 @@ function first(...values: unknown[]): unknown {
     return values.find(value => value !== undefined && value !== null);
 }
 
-function toId(value: unknown): number | undefined {
+/**
+ * Positive integer ID of the API, undefined for anything else.
+ *
+ * @param value - Raw value
+ */
+export function toId(value: unknown): number | undefined {
     const id = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
     return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }

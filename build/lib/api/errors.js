@@ -21,6 +21,7 @@ __export(errors_exports, {
   AbortedError: () => AbortedError,
   ApiError: () => ApiError,
   BlinkError: () => BlinkError,
+  BusyError: () => BusyError,
   CredentialsRejectedError: () => CredentialsRejectedError,
   RateLimitedError: () => RateLimitedError,
   SessionExpiredError: () => SessionExpiredError,
@@ -80,6 +81,12 @@ class ApiError extends BlinkError {
     this.status = status;
   }
 }
+class BusyError extends BlinkError {
+  /** Creates the error */
+  constructor() {
+    super("Blink is busy with another command");
+  }
+}
 class AbortedError extends BlinkError {
   /** Creates the error */
   constructor() {
@@ -105,6 +112,7 @@ function describeError(err) {
   AbortedError,
   ApiError,
   BlinkError,
+  BusyError,
   CredentialsRejectedError,
   RateLimitedError,
   SessionExpiredError,

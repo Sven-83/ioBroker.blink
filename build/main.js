@@ -27,6 +27,7 @@ var import_http = require("./lib/api/http");
 var import_oauth = require("./lib/api/oauth");
 var import_rest = require("./lib/api/rest");
 var import_session_store = require("./lib/model/session-store");
+var import_arm_queue = require("./lib/model/arm-queue");
 var import_tree = require("./lib/model/tree");
 var import_config = require("./lib/util/config");
 const RETRY_START_S = 60;
@@ -38,6 +39,9 @@ class Blink extends utils.Adapter {
   oauth;
   rest;
   tree;
+  arm;
+  /** Requests of the cloud run one after the other, see exclusive() */
+  lane = Promise.resolve();
   session;
   timer;
   retrySeconds = RETRY_START_S;
@@ -57,6 +61,7 @@ class Blink extends utils.Adapter {
       name: "blink"
     });
     this.on("ready", this.onReady.bind(this));
+    this.on("stateChange", this.onStateChange.bind(this));
     this.on("message", this.onMessage.bind(this));
     this.on("unload", this.onUnload.bind(this));
   }
@@ -95,6 +100,25 @@ class Blink extends utils.Adapter {
       },
       info: (message) => this.log.info(message)
     });
+    this.arm = new import_arm_queue.ArmQueue(
+      {
+        online: () => this.cloudConnected,
+        send: (networkId, armed) => this.exclusive(() => this.authorized((session) => this.rest.setArmed(session, networkId, armed))),
+        commandStatus: (networkId, commandId) => this.exclusive(
+          () => this.authorized((session) => this.rest.commandStatus(session, networkId, commandId))
+        ),
+        read: async (networkId) => {
+          var _a;
+          const homescreen = await this.exclusive(() => this.readCloud());
+          return (_a = homescreen.networks.find((network) => network.id === networkId)) == null ? void 0 : _a.armed;
+        },
+        wait: (ms) => this.delay(ms),
+        info: (message) => this.log.info(message),
+        warn: (message) => this.log.warn(message)
+      },
+      this.tree
+    );
+    await this.subscribeStatesAsync("networks.*.armed");
     await this.setLoginState("connecting");
     this.schedule(Math.floor(Math.random() * START_JITTER_MS), () => this.connect());
   }
@@ -235,12 +259,7 @@ class Blink extends utils.Adapter {
   async poll() {
     const started = Date.now();
     try {
-      const homescreen = await this.fetchHomescreen();
-      if (this.abort.signal.aborted) {
-        return;
-      }
-      await this.tree.apply(homescreen);
-      await this.setState("info.lastPoll", Date.now(), true);
+      const homescreen = await this.exclusive(() => this.readCloud());
       await this.setConnection(true);
       await this.setLoginState("ok");
       this.retrySeconds = RETRY_START_S;
@@ -253,17 +272,70 @@ class Blink extends utils.Adapter {
       await this.handleFailure(err);
     }
   }
-  /** Reads the homescreen. A rejected token is renewed once, because a new login could trigger a 2FA SMS. */
-  async fetchHomescreen() {
+  /**
+   * Runs cloud requests one after the other. Otherwise two token refreshes could use up the same refresh
+   * token, and a poll started before a command could write its old values after it.
+   *
+   * @param task - Requests of the cloud
+   */
+  exclusive(task) {
+    const run = this.lane.then(task);
+    this.lane = run.catch(() => void 0);
+    return run;
+  }
+  /** Reads the homescreen and writes it into the object tree. */
+  async readCloud() {
+    const homescreen = await this.authorized((session) => this.rest.homescreen(session));
+    if (this.abort.signal.aborted) {
+      throw new import_errors.AbortedError();
+    }
+    await this.tree.apply(homescreen);
+    await this.setState("info.lastPoll", Date.now(), true);
+    return homescreen;
+  }
+  /**
+   * Runs a request with a valid token. A rejected token is renewed once, because a new login could
+   * trigger a 2FA SMS.
+   *
+   * @param request - The request
+   */
+  async authorized(request) {
     await this.ensureFresh();
     try {
-      return await this.rest.homescreen(this.currentSession());
+      return await request(this.currentSession());
     } catch (err) {
       if (!(err instanceof import_errors.SessionExpiredError)) {
         throw err;
       }
       await this.ensureFresh(true);
-      return this.rest.homescreen(this.currentSession());
+      return request(this.currentSession());
+    }
+  }
+  /**
+   * User wants to arm or disarm a network. ack: true follows with the state read back from Blink.
+   *
+   * @param id - Full state ID
+   * @param state - New state
+   */
+  onStateChange(id, state) {
+    if (!state || state.ack || !this.arm) {
+      return;
+    }
+    const match = id.slice(this.namespace.length + 1).match(/^networks\.(\d+)\.armed$/);
+    if (!match) {
+      return;
+    }
+    const networkId = Number(match[1]);
+    const fail = (err) => {
+      if (!this.abort.signal.aborted) {
+        this.log.error(`Network ${networkId}: ${(0, import_errors.describeError)(err)}`);
+      }
+    };
+    if (typeof state.val === "boolean") {
+      this.arm.request(networkId, state.val).catch(fail);
+    } else {
+      this.log.warn(`Network ${networkId}: "armed" needs true or false`);
+      this.arm.restore(networkId).catch(fail);
     }
   }
   currentSession() {

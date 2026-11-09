@@ -24,7 +24,14 @@ interface StateDef<T> {
     type: 'string' | 'number' | 'boolean';
     role: string;
     unit?: string;
-    get: (item: T) => ioBroker.StateValue | undefined;
+    /** Can be switched by the user */
+    write?: boolean;
+    /** Text of the possible values */
+    states?: Record<string, string>;
+    /** Polled value. Without it the state belongs to a command: created always, never written when polling */
+    get?: (item: T) => ioBroker.StateValue | undefined;
+    /** Value after the start of the adapter, for a state without polled value */
+    initial?: ioBroker.StateValue;
 }
 
 const AVAILABLE_KEY = 'available';
@@ -44,7 +51,15 @@ function common<T>(): StateDef<T & { name: string }>[] {
 
 const NETWORK_STATES: StateDef<BlinkNetwork>[] = [
     ...common<BlinkNetwork>(),
-    { key: 'armed', name: 'Armed', type: 'boolean', role: 'indicator', get: item => item.armed },
+    { key: 'armed', name: 'Armed', type: 'boolean', role: 'switch', write: true, get: item => item.armed },
+    { key: 'armPending', name: 'Arm command running', type: 'boolean', role: 'indicator.working', initial: false },
+    {
+        key: 'armResult',
+        name: 'Result of the last arm command',
+        type: 'string',
+        role: 'text',
+        states: { confirmed: 'confirmed', rejected: 'rejected', unconfirmed: 'not confirmed' },
+    },
 ];
 
 const SYNC_STATES: StateDef<BlinkSyncModule>[] = [
@@ -102,6 +117,7 @@ const DEVICE_STATES: StateDef<BlinkDevice>[] = [
 export class ObjectTree {
     private readonly objects = new Map<string, string>();
     private readonly values = new Map<string, ioBroker.StateValue>();
+    private readonly held = new Set<string>();
     private known: Set<string> | undefined;
 
     /**
@@ -147,11 +163,11 @@ export class ObjectTree {
             seen.add(base);
             await this.ensureObject(base, { type: 'device', common: { name: item.name }, native: {} });
             for (const def of defs) {
-                const value = def.get(item);
-                if (value === undefined) {
+                const id = `${base}.${def.key}`;
+                const value = def.get ? def.get(item) : this.values.has(id) ? undefined : def.initial;
+                if (value === undefined && def.get) {
                     continue;
                 }
-                const id = `${base}.${def.key}`;
                 await this.ensureObject(id, {
                     type: 'state',
                     common: {
@@ -159,12 +175,15 @@ export class ObjectTree {
                         type: def.type,
                         role: def.role,
                         read: true,
-                        write: false,
+                        write: def.write ?? false,
                         ...(def.unit ? { unit: def.unit } : {}),
+                        ...(def.states ? { states: def.states } : {}),
                     },
                     native: {},
                 });
-                await this.setValue(id, value);
+                if (value !== undefined) {
+                    await this.setValue(id, value);
+                }
             }
         }
     }
@@ -177,8 +196,48 @@ export class ObjectTree {
         }
     }
 
-    private async setValue(id: string, value: ioBroker.StateValue): Promise<boolean> {
-        if (this.values.get(id) === value) {
+    /**
+     * Last value written to a state.
+     *
+     * @param id - Relative state ID
+     */
+    public value(id: string): ioBroker.StateValue | undefined {
+        return this.values.get(id);
+    }
+
+    /**
+     * Keeps polled values away from a state while a command is running on it.
+     *
+     * @param id - Relative state ID
+     */
+    public hold(id: string): void {
+        this.held.add(id);
+    }
+
+    /**
+     * Ends hold(). The value is written even if it equals the last one: it has to replace the
+     * user's unacknowledged request.
+     *
+     * @param id - Relative state ID
+     * @param value - Real value; if unknown the state stays as it is until the next poll
+     */
+    public async release(id: string, value: ioBroker.StateValue | undefined): Promise<void> {
+        this.held.delete(id);
+        this.values.delete(id);
+        if (value !== undefined) {
+            await this.setValue(id, value);
+        }
+    }
+
+    /**
+     * Writes a state with ack: true if its value has changed.
+     *
+     * @param id - Relative state ID
+     * @param value - New value
+     * @returns The value was written
+     */
+    public async setValue(id: string, value: ioBroker.StateValue): Promise<boolean> {
+        if (this.held.has(id) || this.values.get(id) === value) {
             return false;
         }
         await this.host.writeState(id, value);

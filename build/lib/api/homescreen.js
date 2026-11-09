@@ -19,6 +19,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var homescreen_exports = {};
 __export(homescreen_exports, {
   parseHomescreen: () => parseHomescreen,
+  toId: () => toId,
   toVolt: () => toVolt
 });
 module.exports = __toCommonJS(homescreen_exports);
@@ -162,6 +163,7 @@ function parseHomescreen(body) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   parseHomescreen,
+  toId,
   toVolt
 });
 //# sourceMappingURL=homescreen.js.map

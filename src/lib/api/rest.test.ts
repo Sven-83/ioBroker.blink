@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { ApiError, RateLimitedError, SessionExpiredError } from './errors';
+import { ApiError, BusyError, RateLimitedError, SessionExpiredError } from './errors';
 import { HttpClient } from './http';
 import { OAuthFlow, newHardwareId } from './oauth';
 import { RestClient } from './rest';
@@ -16,6 +16,7 @@ interface FakeBlink {
     password: string;
     accountId: number;
     config: Record<string, unknown>;
+    stats: Record<string, number>;
     revokeAll(): void;
     close(): Promise<void>;
 }
@@ -84,5 +85,47 @@ describe('api/rest', () => {
     it('rejects an answer that is not a homescreen', async () => {
         cloud.config.homescreen = { message: 'maintenance' };
         expect(await rejection(rest.homescreen(session))).to.be.instanceOf(ApiError);
+    });
+
+    it('arms over the current path and follows the command', async () => {
+        const id = await rest.setArmed(session, 1001, false);
+        expect(id).to.be.a('number');
+        expect(cloud.stats.armNew).to.equal(1);
+        expect(cloud.stats.armOld).to.equal(0);
+        expect(await rest.commandStatus(session, 1001, id!)).to.equal('done');
+    });
+
+    it('uses the older path only if the current one is unknown', async () => {
+        cloud.config.armNewPathStatus = 404;
+        const id = await rest.setArmed(session, 1001, false);
+        expect(id).to.be.a('number');
+        expect(cloud.stats.armNew).to.equal(1);
+        expect(cloud.stats.armOld).to.equal(1);
+    });
+
+    it('does not send a command twice after any other error', async () => {
+        cloud.config.armNewPathStatus = 500;
+        const err = await rejection(rest.setArmed(session, 1001, false));
+        expect((err as ApiError).status).to.equal(500);
+        expect(cloud.stats.armOld).to.equal(0);
+    });
+
+    it('recognises a busy system and a running or failed command', async () => {
+        cloud.config.armBusyCount = 1;
+        expect(await rejection(rest.setArmed(session, 1001, false))).to.be.instanceOf(BusyError);
+
+        cloud.config.armDelayMs = 60_000;
+        const running = await rest.setArmed(session, 1001, false);
+        expect(await rest.commandStatus(session, 1001, running!)).to.equal('running');
+
+        cloud.config.armDelayMs = 0;
+        cloud.config.armCommandFails = true;
+        const failed = await rest.setArmed(session, 1001, false);
+        expect(await rest.commandStatus(session, 1001, failed!)).to.equal('failed');
+    });
+
+    it('rejects a rejected token on commands as an expired session', async () => {
+        cloud.revokeAll();
+        expect(await rejection(rest.setArmed(session, 1001, false))).to.be.instanceOf(SessionExpiredError);
     });
 });

@@ -288,9 +288,8 @@ tests.integration(path.join(__dirname, '..'), {
                 expect(object.common.name).to.equal('Test Camera');
                 // a Mini has no battery, so there is no empty state for it
                 expect(await harness.objects.getObjectAsync(`${NS}.cameras.3002.batteryLevel`)).to.equal(null);
-                // armed only becomes writable with the readback of phase 4
                 const armed = await harness.objects.getObjectAsync(`${NS}.networks.1001.armed`);
-                expect(armed.common.write).to.equal(false);
+                expect(armed.common.write).to.equal(true);
             });
 
             it('polls again and renews a rejected token without a new login', async function () {
@@ -347,6 +346,127 @@ tests.integration(path.join(__dirname, '..'), {
                 await waitFor(async () => (await stateVal(harness, 'info.loginState')) === 'rateLimited', 'still waiting');
                 await new Promise(resolve => setTimeout(resolve, 3_000));
                 expect(cloud.stats.homescreenRequests).to.equal(requests);
+            });
+
+            it('keeps password, e-mail address and tokens out of states and log', async () => {
+                await expectNoSecrets(harness, [cloud.email, cloud.password, ...cloud.issuedTokens()]);
+            });
+        });
+
+        suite('Arm and disarm', getHarness => {
+            let harness;
+            let cloud;
+            const ARMED = `${NS}.networks.1001.armed`;
+
+            const command = val => harness.states.setState(ARMED, { val, ack: false });
+            const armedState = () => harness.states.getState(ARMED);
+            const waitForResult = (result, timeoutMs) =>
+                waitFor(
+                    async () =>
+                        (await stateVal(harness, 'networks.1001.armPending')) === false &&
+                        (await stateVal(harness, 'networks.1001.armResult')) === result,
+                    `result ${result}`,
+                    timeoutMs,
+                );
+            const clearResult = () =>
+                harness.states.setState(`${NS}.networks.1001.armResult`, { val: '', ack: true });
+
+            before(async function () {
+                this.timeout(60_000);
+                harness = getHarness();
+                cloud = await startFakeBlink();
+                await harness.changeAdapterConfig('blink', {
+                    native: { email: cloud.email, password: cloud.password, pin: '', pollInterval: 3600 },
+                });
+                await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
+                await waitFor(async () => (await stateVal(harness, 'info.connection')) === true, 'connected');
+            });
+
+            after(async () => {
+                await cloud?.close();
+            });
+
+            it('starts without a running command', async () => {
+                expect(await stateVal(harness, 'networks.1001.armPending')).to.equal(false);
+                expect((await armedState()).val).to.equal(true);
+                expect((await armedState()).ack).to.equal(true);
+            });
+
+            it('disarms: pending at once, ack only with the state read back', async function () {
+                this.timeout(20_000);
+                cloud.config.armDelayMs = 2_500;
+                await command(false);
+                await waitFor(
+                    async () => (await stateVal(harness, 'networks.1001.armPending')) === true,
+                    'pending',
+                    1_000,
+                );
+                expect((await armedState()).ack, 'no ack while Blink has not confirmed').to.equal(false);
+
+                await waitForResult('confirmed', 15_000);
+                expect((await armedState()).val).to.equal(false);
+                expect((await armedState()).ack).to.equal(true);
+                expect(cloud.stats.armNew).to.equal(1);
+                expect(cloud.stats.commandStatus).to.be.greaterThan(0);
+                cloud.config.armDelayMs = 0;
+            });
+
+            it('arms again over the older path if the current one is unknown', async function () {
+                this.timeout(20_000);
+                await clearResult();
+                cloud.config.armNewPathStatus = 404;
+                const before = cloud.stats.armOld;
+                await command(true);
+                await waitForResult('confirmed', 15_000);
+                expect(cloud.stats.armOld).to.equal(before + 1);
+                expect((await armedState()).val).to.equal(true);
+                cloud.config.armNewPathStatus = 200;
+            });
+
+            it('jumps back to the real state when Blink refuses', async function () {
+                this.timeout(20_000);
+                await clearResult();
+                cloud.config.armNewPathStatus = 500;
+                await command(false);
+                await waitForResult('rejected', 15_000);
+                const state = await armedState();
+                expect(state.val, 'still armed at Blink').to.equal(true);
+                expect(state.ack).to.equal(true);
+                cloud.config.armNewPathStatus = 200;
+            });
+
+            it('jumps back when Blink accepts the command but nothing happens', async function () {
+                this.timeout(40_000);
+                await clearResult();
+                cloud.config.armIgnored = true;
+                await command(false);
+                await waitForResult('unconfirmed', 35_000);
+                const state = await armedState();
+                expect(state.val).to.equal(true);
+                expect(state.ack).to.equal(true);
+                expect(harness.hasLog(/has not confirmed/, 'warn')).to.equal(true);
+                cloud.config.armIgnored = false;
+            });
+
+            it('sends a command after the token was rejected, without a new login', async function () {
+                this.timeout(20_000);
+                await clearResult();
+                const signin = cloud.stats.signin;
+                const refresh = cloud.stats.refresh;
+                cloud.revokeAccessTokens();
+                await command(false);
+                await waitForResult('confirmed', 15_000);
+                expect(cloud.stats.signin).to.equal(signin);
+                expect(cloud.stats.refresh).to.equal(refresh + 1);
+                expect((await armedState()).val).to.equal(false);
+            });
+
+            it('ignores values with ack: true', async function () {
+                this.timeout(10_000);
+                const before = cloud.stats.armNew;
+                await harness.states.setState(ARMED, { val: true, ack: true });
+                await new Promise(resolve => setTimeout(resolve, 1_500));
+                expect(cloud.stats.armNew).to.equal(before);
             });
 
             it('keeps password, e-mail address and tokens out of states and log', async () => {

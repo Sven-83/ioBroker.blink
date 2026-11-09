@@ -68,6 +68,14 @@ export class ApiError extends BlinkError {
     }
 }
 
+/** Blink is still working on another command of the network */
+export class BusyError extends BlinkError {
+    /** Creates the error */
+    public constructor() {
+        super('Blink is busy with another command');
+    }
+}
+
 /** The adapter is shutting down */
 export class AbortedError extends BlinkError {
     /** Creates the error */
