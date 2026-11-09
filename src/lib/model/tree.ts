@@ -132,6 +132,26 @@ const DEVICE_STATES: StateDef<BlinkDevice>[] = [
     { key: 'image', name: 'Address of the last image', type: 'string', role: 'url' },
     { key: 'imageTime', name: 'Time of the last image, 0 if unknown', type: 'number', role: 'value.time' },
     { key: 'imageInfo', name: 'Internal data of the last image', type: 'string', role: 'json' },
+    { key: 'liveActive', name: 'Live image running', type: 'boolean', role: 'indicator.working', initial: false },
+    {
+        key: 'liveResult',
+        name: 'State of the live image',
+        type: 'string',
+        role: 'text',
+        states: {
+            running: 'running',
+            ended: 'ended',
+            idle: 'ended, nobody watched',
+            failed: 'failed',
+            certificate: 'certificate of the stream server not accepted',
+            noFfmpeg: 'ffmpeg not found',
+            offline: 'camera offline',
+            unsupported: 'not offered by Blink for this camera',
+            disabled: 'switched off in the settings',
+            busy: 'another live image is running',
+            rejected: 'not possible at the moment',
+        },
+    },
 ];
 
 /** Keeps the object tree in line with the homescreen, with as few database writes as possible */

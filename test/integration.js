@@ -593,6 +593,71 @@ tests.integration(path.join(__dirname, '..'), {
             });
         });
 
+        suite('Live image', getHarness => {
+            let harness;
+            let cloud;
+
+            const start = cameraId => sendTo(harness, 'liveStart', { cameraId });
+
+            before(async function () {
+                this.timeout(60_000);
+                harness = getHarness();
+                cloud = await startFakeBlink();
+                await harness.changeAdapterConfig('blink', {
+                    native: {
+                        email: cloud.email,
+                        password: cloud.password,
+                        pin: '',
+                        pollInterval: 3600,
+                        liveEnabled: false,
+                        ffmpegPath: 'not-allowed-program',
+                    },
+                });
+                await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
+                await harness.enableSendTo();
+                await waitFor(async () => (await stateVal(harness, 'info.connection')) === true, 'connected');
+            });
+
+            after(async () => {
+                await cloud?.close();
+            });
+
+            it('is switched off by default and does not wake a camera', async function () {
+                this.timeout(15_000);
+                const answer = await start(3001);
+                expect(answer).to.deep.equal({ success: false, result: 'disabled' });
+                expect(await stateVal(harness, 'cameras.3001.liveResult')).to.equal('disabled');
+                expect(await stateVal(harness, 'cameras.3001.liveActive')).to.equal(false);
+                expect(cloud.stats.liveStart).to.equal(0);
+            });
+
+            it('does not wake a camera if ffmpeg is not available', async function () {
+                this.timeout(30_000);
+                await harness.stopAdapter();
+                await harness.changeAdapterConfig('blink', { native: { liveEnabled: true } });
+                // otherwise the wait below would see the value of the last run
+                await harness.states.setState(`${NS}.info.connection`, { val: false, ack: true });
+                await markStopped(harness);
+                await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
+                await waitFor(async () => (await stateVal(harness, 'info.connection')) === true, 'connected');
+                const answer = await start(3001);
+                expect(answer).to.deep.equal({ success: false, result: 'noFfmpeg' });
+                expect(cloud.stats.liveStart).to.equal(0);
+                expect(harness.hasLog(/ffmpeg not found/, 'warn')).to.equal(true);
+            });
+
+            it('refuses a message without a valid camera', async function () {
+                this.timeout(10_000);
+                expect(await start('x')).to.deep.equal({ success: false, result: 'rejected' });
+                expect(await start(99_999)).to.deep.equal({ success: false, result: 'rejected' });
+            });
+
+            it('ignores a stop for a camera without a live image', async function () {
+                this.timeout(10_000);
+                expect(await sendTo(harness, 'liveStop', { cameraId: 3001 })).to.deep.equal({ success: true });
+            });
+        });
+
         suite('Wrong password', getHarness => {
             let harness;
             let cloud;

@@ -89,7 +89,12 @@
         "password": "",
         "pin": "",
         "pollInterval": 60,
-        "imageRetentionHours": 24
+        "imageRetentionHours": 24,
+        "liveEnabled": false,
+        "liveBind": "127.0.0.1",
+        "livePort": 8766,
+        "liveMaxSeconds": 120,
+        "ffmpegPath": ""
     },
     "encryptedNative": [
         "password"

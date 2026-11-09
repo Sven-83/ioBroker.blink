@@ -2,10 +2,14 @@
  * ioBroker.blink
  * Adapter lifecycle only - Blink API in lib/api, object tree in lib/model, helpers in lib/util.
  *
- * Phase 5: login with 2FA, encrypted session, token refresh, backoff, polling, arm/disarm with readback, snapshots.
+ * Phase 6: login with 2FA, encrypted session, token refresh, backoff, polling, arm/disarm with readback, snapshots,
+ * live image.
  */
 
 import * as utils from '@iobroker/adapter-core';
+import { spawn } from 'node:child_process';
+import { connect as netConnect } from 'node:net';
+import { connect as tlsConnect } from 'node:tls';
 import {
     AbortedError,
     CredentialsRejectedError,
@@ -16,6 +20,7 @@ import {
 } from './lib/api/errors';
 import { HttpClient } from './lib/api/http';
 import type { Homescreen } from './lib/api/homescreen';
+import type { ImmiSocket } from './lib/api/immi';
 import { OAuthFlow, newHardwareId } from './lib/api/oauth';
 import { RestClient } from './lib/api/rest';
 import type { Session, TokenSet } from './lib/api/types';
@@ -28,11 +33,16 @@ import {
 } from './lib/model/session-store';
 import { ArmQueue } from './lib/model/arm-queue';
 import { ImageStore } from './lib/model/image-store';
+import { LiveManager } from './lib/model/live-manager';
 import { SnapshotQueue } from './lib/model/snapshot-queue';
 import { ObjectTree } from './lib/model/tree';
 import {
     TEST_ORIGIN_ENV,
+    ffmpegCommand,
     imageRetentionHours,
+    liveBindAddress,
+    liveMaxSeconds,
+    livePort,
     normalizeEmail,
     normalizePin,
     pollDelayMs,
@@ -66,6 +76,7 @@ class Blink extends utils.Adapter {
     private arm: ArmQueue | undefined;
     private images: ImageStore | undefined;
     private snapshots: SnapshotQueue | undefined;
+    private live: LiveManager | undefined;
     private homescreen: Homescreen | undefined;
     /** Requests of the cloud run one after the other, see exclusive() */
     private lane: Promise<unknown> = Promise.resolve();
@@ -205,6 +216,37 @@ class Blink extends utils.Adapter {
             },
             this.tree,
             this.images,
+        );
+        const ffmpeg = ffmpegCommand(this.config.ffmpegPath);
+        this.live = new LiveManager(
+            {
+                enabled: () => this.config.liveEnabled === true,
+                online: () => this.cloudConnected,
+                device: cameraId => this.homescreen?.devices.find(device => device.id === cameraId),
+                ffmpegAvailable: () => this.ffmpegAvailable(ffmpeg),
+                spawnFfmpeg: args =>
+                    spawn(ffmpeg ?? 'ffmpeg', args, {
+                        shell: false,
+                        stdio: ['pipe', 'pipe', 'pipe'],
+                        windowsHide: true,
+                    }),
+                start: (device, networkId) =>
+                    this.exclusive(() =>
+                        this.authorized(session => this.rest!.startLive(session, networkId, device.kind, device.id)),
+                    ),
+                stop: (networkId, commandId) =>
+                    this.exclusive(() =>
+                        this.authorized(session => this.rest!.stopLive(session, networkId, commandId)),
+                    ),
+                connect: (host, port, ready) => this.connectStream(origin, host, port, ready),
+                setTimer: (run, ms) => this.setTimeout(run, ms),
+                clearTimer: timer => this.clearTimeout(timer as ioBroker.Timeout),
+                listen: () => ({ host: liveBindAddress(this.config.liveBind), port: livePort(this.config.livePort) }),
+                maxMs: () => liveMaxSeconds(this.config.liveMaxSeconds) * 1000,
+                debug: message => this.log.debug(message),
+                warn: message => this.log.warn(message),
+            },
+            this.tree,
         );
         await this.subscribeStatesAsync('cameras.*.snapshot');
         await this.subscribeStatesAsync('networks.*.armed');
@@ -372,6 +414,40 @@ class Blink extends utils.Adapter {
         } catch (err) {
             await this.handleFailure(err);
         }
+    }
+
+    /**
+     * ffmpeg can be started.
+     *
+     * @param command - Program, undefined if the setting is not acceptable
+     */
+    private ffmpegAvailable(command: string | undefined): Promise<boolean> {
+        if (!command) {
+            return Promise.resolve(false);
+        }
+        return new Promise(resolve => {
+            const check = spawn(command, ['-version'], { shell: false, stdio: 'ignore', windowsHide: true });
+            check.on('error', () => resolve(false));
+            check.on('exit', code => resolve(code === 0));
+        });
+    }
+
+    /**
+     * Connection to a stream server. The certificate is checked: the stream token is only sent if it is accepted.
+     *
+     * @param origin - Local fake cloud of the integration test
+     * @param host - Host of the stream server
+     * @param port - TCP port of the stream server
+     * @param ready - Called when the connection can be used
+     */
+    private connectStream(origin: string | undefined, host: string, port: number, ready: () => void): ImmiSocket {
+        if (origin) {
+            return netConnect(Number(new URL(origin).port), '127.0.0.1', ready);
+        }
+        if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+            throw new Error('TLS certificate checks are switched off in this process, nothing is sent to Blink');
+        }
+        return tlsConnect({ host, port, servername: host, rejectUnauthorized: true }, ready);
     }
 
     /**
@@ -545,19 +621,23 @@ class Blink extends utils.Adapter {
     }
 
     /**
-     * sendTo commands: verifyPin.
+     * sendTo commands: verifyPin, liveStart, liveStop.
      *
      * @param obj - Message
      */
     private async onMessage(obj: ioBroker.Message): Promise<void> {
-        if (obj?.command !== 'verifyPin') {
-            return;
-        }
         const reply = (result: Record<string, unknown>): void => {
-            if (obj.callback) {
+            if (obj?.callback) {
                 this.sendTo(obj.from, obj.command, result, obj.callback);
             }
         };
+        if (obj?.command === 'liveStart' || obj?.command === 'liveStop') {
+            await this.onLiveMessage(obj, reply);
+            return;
+        }
+        if (obj?.command !== 'verifyPin') {
+            return;
+        }
         const message = obj.message as { pin?: unknown } | undefined;
         const pin = normalizePin(typeof message?.pin === 'number' ? String(message.pin) : message?.pin);
         const pending = decodePending((await this.getStateAsync('auth.pending'))?.val, this.codec);
@@ -577,6 +657,37 @@ class Blink extends utils.Adapter {
             reply({ success: false, error: describeError(err) });
         } finally {
             this.connecting = false;
+        }
+    }
+
+    /**
+     * Starts or ends a live image. The address with its token goes to the asking client only, not into a state
+     * (audit B.10.22). It contains port and path: the client knows the host it is talking to.
+     *
+     * @param obj - Message
+     * @param reply - Sends the answer
+     */
+    private async onLiveMessage(
+        obj: ioBroker.Message,
+        reply: (result: Record<string, unknown>) => void,
+    ): Promise<void> {
+        const message = obj.message as { cameraId?: unknown } | undefined;
+        const cameraId = Number(message?.cameraId);
+        if (!Number.isSafeInteger(cameraId) || cameraId <= 0 || !this.live) {
+            return reply({ success: false, result: 'rejected' });
+        }
+        try {
+            if (obj.command === 'liveStop') {
+                await this.live.stop(cameraId);
+                return reply({ success: true });
+            }
+            const access = await this.live.start(cameraId);
+            reply({ success: access.result === 'running', ...access });
+        } catch (err) {
+            if (!this.abort.signal.aborted) {
+                this.log.warn(`Camera ${cameraId}: ${describeError(err)}`);
+                reply({ success: false, result: 'failed' });
+            }
         }
     }
 
@@ -638,6 +749,7 @@ class Blink extends utils.Adapter {
     private onUnload(callback: () => void): void {
         try {
             this.abort.abort();
+            this.live?.shutdown();
             this.clearTimeout(this.timer);
             this.timer = undefined;
         } finally {

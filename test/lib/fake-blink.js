@@ -96,6 +96,7 @@ function defaultHomescreen() {
  * @param {number} [options.imageStatus] - HTTP status of image downloads (other than 200: error answer)
  * @param {string} [options.imageBody] - Answer of image downloads instead of an image
  * @param {object} [options.commandAnswer] - Fixed answer of the command status
+ * @param {object} [options.liveAnswer] - Answer to the start of a live session
  */
 async function startFakeBlink(options = {}) {
     const config = {
@@ -115,6 +116,12 @@ async function startFakeBlink(options = {}) {
         snapshotSameContent: false,
         snapshotCommandFails: false,
         imageStatus: 200,
+        liveAnswer: {
+            command_id: 950,
+            server: 'immis://stream-test.immedia-semi.com:443/fake-transaction__IMDS_TEST?client_id=250',
+            liveview_token: 'fake-live-token',
+            duration: 300,
+        },
         ...options,
     };
     const commands = new Map(); // id -> { doneAt, failed }
@@ -139,6 +146,8 @@ async function startFakeBlink(options = {}) {
         commandStatus: 0,
         snapshot: 0,
         image: 0,
+        liveStart: 0,
+        liveDone: 0,
     };
 
     const allDevices = () => [
@@ -401,6 +410,19 @@ async function startFakeBlink(options = {}) {
             return res.end(
                 Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(`fake-${imagePath[1]}-${version}`)]),
             );
+        }
+
+        if (req.method === 'POST' && /\/liveview$/.test(url.pathname)) {
+            stats.liveStart++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            return send(res, 200, config.liveAnswer);
+        }
+
+        if (req.method === 'POST' && /^\/network\/\d+\/command\/\d+\/done\/$/.test(url.pathname)) {
+            stats.liveDone++;
+            return send(res, 200, { message: 'done' });
         }
 
         const commandPath = url.pathname.match(/^\/network\/\d+\/command\/(\d+)$/);

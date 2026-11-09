@@ -86,6 +86,72 @@
             "md": 6,
             "lg": 4,
             "xl": 4
+        },
+        "_headerLive": {
+            "type": "header",
+            "text": "Live image",
+            "size": 2,
+            "newLine": true
+        },
+        "liveEnabled": {
+            "type": "checkbox",
+            "label": "Allow live image",
+            "help": "Needs ffmpeg. A live image keeps a battery camera awake.",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "liveBind": {
+            "type": "text",
+            "label": "Address of the live image",
+            "help": "127.0.0.1 is this computer only. Enter the address of this computer for displays in your network.",
+            "hidden": "!data.liveEnabled",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "livePort": {
+            "type": "number",
+            "label": "Port of the live image",
+            "min": 1024,
+            "max": 65535,
+            "hidden": "!data.liveEnabled",
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "liveMaxSeconds": {
+            "type": "number",
+            "label": "Time limit of a live image",
+            "help": "Seconds, 30 to 600",
+            "min": 30,
+            "max": 600,
+            "hidden": "!data.liveEnabled",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "ffmpegPath": {
+            "type": "text",
+            "label": "Path of ffmpeg",
+            "help": "Empty: ffmpeg is searched in the usual places. Otherwise the full path of the program.",
+            "hidden": "!data.liveEnabled",
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
         }
     }
 }

@@ -71,6 +71,8 @@ describe('model/tree', () => {
             'cameras.1.image',
             'cameras.1.imageTime',
             'cameras.1.imageInfo',
+            'cameras.1.liveActive',
+            'cameras.1.liveResult',
         ]);
         expect(host.writes).to.deep.include(['cameras.1.temperature', 0]);
         expect(host.writes).to.deep.include(['cameras.1.batteryLow', false]);

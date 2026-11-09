@@ -2,6 +2,9 @@
  * Validation of the instance config.
  */
 
+import { isIP } from 'node:net';
+import { basename, isAbsolute } from 'node:path';
+
 /**
  * Polling interval limits in seconds. Blink wakes battery cameras for some requests,
  * so the default stays moderate (audit B.11.16).
@@ -39,6 +42,60 @@ export function imageRetentionHours(value: unknown): number {
         return IMAGE_RETENTION_DEFAULT_H;
     }
     return Math.min(Math.max(hours, IMAGE_RETENTION_MIN_H), IMAGE_RETENTION_MAX_H);
+}
+
+/** Limits of a live session in seconds: it keeps a battery camera awake */
+export const LIVE_MAX_DEFAULT_S = 120;
+export const LIVE_MAX_MIN_S = 30;
+export const LIVE_MAX_MAX_S = 600;
+/** Port of the live image */
+export const LIVE_PORT_DEFAULT = 8766;
+
+/**
+ * Time limit of a live session from the config, clamped to the allowed range.
+ *
+ * @param value - Value from the instance config
+ */
+export function liveMaxSeconds(value: unknown): number {
+    const seconds = Math.round(Number(value));
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+        return LIVE_MAX_DEFAULT_S;
+    }
+    return Math.min(Math.max(seconds, LIVE_MAX_MIN_S), LIVE_MAX_MAX_S);
+}
+
+/**
+ * Address of the server of the live image (audit B.10.20): this computer only, unless the user decides otherwise.
+ *
+ * @param value - Value from the instance config
+ */
+export function liveBindAddress(value: unknown): string {
+    const address = typeof value === 'string' ? value.trim() : '';
+    return isIP(address) ? address : '127.0.0.1';
+}
+
+/**
+ * Port of the server of the live image.
+ *
+ * @param value - Value from the instance config
+ */
+export function livePort(value: unknown): number {
+    const port = Math.round(Number(value));
+    return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : LIVE_PORT_DEFAULT;
+}
+
+/**
+ * Program to start for ffmpeg (audit B.10.21): the plain name, or the absolute path of a program called ffmpeg.
+ *
+ * @param value - Value from the instance config
+ * @returns The program, undefined if the value is not acceptable
+ */
+export function ffmpegCommand(value: unknown): string | undefined {
+    const path = typeof value === 'string' ? value.trim() : '';
+    if (!path) {
+        return 'ffmpeg';
+    }
+    return isAbsolute(path) && /^ffmpeg(\.exe)?$/i.test(basename(path)) ? path : undefined;
 }
 
 /** Largest random addition to the polling interval (audit B.11.1) */

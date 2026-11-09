@@ -17,7 +17,7 @@ interface FakeBlink {
     accountId: number;
     config: Record<string, unknown>;
     stats: Record<string, number>;
-    requests: { method: string; path: string }[];
+    requests: { method: string; path: string; body: string }[];
     revokeAll(): void;
     close(): Promise<void>;
 }
@@ -179,6 +179,38 @@ describe('api/rest', () => {
         expect(await rest.commandStatus(session, 1001, 1), 'seen live').to.equal('done');
         cloud.config.commandAnswer = { complete: false, status: 0, status_code: 908 };
         expect(await rest.commandStatus(session, 1001, 1), 'seen live').to.equal('running');
+    });
+
+    it('asks each device family for a live image over its own path', async () => {
+        const live = await rest.startLive(session, 1001, 'camera', 3001);
+        expect(live.server).to.match(/^immis:\/\//);
+        expect(live.token).to.equal('fake-live-token');
+        expect(live.commandId).to.equal(950);
+        await rest.startLive(session, 1001, 'mini', 3002);
+        await rest.startLive(session, 1001, 'doorbell', 3003);
+        const paths = cloud.requests.filter(item => item.path.endsWith('/liveview')).map(item => item.path);
+        const base = `/accounts/${cloud.accountId}/networks/1001`;
+        expect(paths).to.deep.equal([
+            `/api/v6${base}/cameras/3001/liveview`,
+            `/api/v2${base}/owls/3002/liveview`,
+            `/api/v2${base}/doorbells/3003/liveview`,
+        ]);
+    });
+
+    it('sends the intent of the app when asking for a live image', async () => {
+        await rest.startLive(session, 1001, 'camera', 3001);
+        const call = cloud.requests.find(item => item.path.endsWith('/liveview'));
+        expect(JSON.parse(call!.body)).to.deep.equal({ intent: 'liveview', motion_event_start_time: null });
+    });
+
+    it('reports an answer without a token as such', async () => {
+        cloud.config.liveAnswer = { server: 'immis://x', command_id: 1 };
+        expect((await rest.startLive(session, 1001, 'camera', 3001)).token).to.equal(undefined);
+    });
+
+    it('tells Blink that a live image has ended', async () => {
+        await rest.stopLive(session, 1001, 950);
+        expect(cloud.stats.liveDone).to.equal(1);
     });
 
     it('downloads an image', async () => {

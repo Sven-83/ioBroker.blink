@@ -171,6 +171,58 @@ export class RestClient {
     }
 
     /**
+     * Asks Blink for a live session. This wakes a battery camera. Regular cameras use a newer version of the
+     * path than Minis and doorbells; only the path of the device family is tried.
+     *
+     * @param session - Logged-in session
+     * @param networkId - Network ID
+     * @param kind - Device family
+     * @param deviceId - Device ID
+     * @returns Address and token of the stream, as far as Blink gave them
+     */
+    public async startLive(
+        session: Session,
+        networkId: number,
+        kind: DeviceKind,
+        deviceId: number,
+    ): Promise<{ server: unknown; token: string | undefined; commandId: number | undefined }> {
+        const base = `/accounts/${session.accountId}/networks/${networkId}`;
+        const path = {
+            camera: `/api/v6${base}/cameras/${deviceId}/liveview`,
+            mini: `/api/v2${base}/owls/${deviceId}/liveview`,
+            doorbell: `/api/v2${base}/doorbells/${deviceId}/liveview`,
+        }[kind];
+        const response = await this.http.request(`${session.restOrigin}${path}`, {
+            method: 'POST',
+            headers: headers(session),
+            json: { intent: 'liveview', motion_event_start_time: null },
+        });
+        check(response, 'Asking Blink for a live image');
+        const body = parseJson(response.body);
+        const token = field(body, 'liveview_token');
+        return {
+            server: field(body, 'server'),
+            token: typeof token === 'string' && token ? token : undefined,
+            commandId: toId(field(body, 'command_id') ?? field(body, 'id')),
+        };
+    }
+
+    /**
+     * Tells Blink that a live session has ended.
+     *
+     * @param session - Logged-in session
+     * @param networkId - Network ID
+     * @param commandId - Command ID of the session
+     */
+    public async stopLive(session: Session, networkId: number, commandId: number): Promise<void> {
+        const response = await this.http.request(
+            `${session.restOrigin}/network/${networkId}/command/${commandId}/done/`,
+            { method: 'POST', headers: headers(session), json: {} },
+        );
+        check(response, 'Ending the Blink live image');
+    }
+
+    /**
      * Downloads the image a "thumbnail" field points to. This does not wake the camera: Blink has the image.
      *
      * @param session - Logged-in session

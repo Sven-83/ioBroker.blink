@@ -21,12 +21,20 @@ __export(config_exports, {
   IMAGE_RETENTION_DEFAULT_H: () => IMAGE_RETENTION_DEFAULT_H,
   IMAGE_RETENTION_MAX_H: () => IMAGE_RETENTION_MAX_H,
   IMAGE_RETENTION_MIN_H: () => IMAGE_RETENTION_MIN_H,
+  LIVE_MAX_DEFAULT_S: () => LIVE_MAX_DEFAULT_S,
+  LIVE_MAX_MAX_S: () => LIVE_MAX_MAX_S,
+  LIVE_MAX_MIN_S: () => LIVE_MAX_MIN_S,
+  LIVE_PORT_DEFAULT: () => LIVE_PORT_DEFAULT,
   POLL_DEFAULT_S: () => POLL_DEFAULT_S,
   POLL_JITTER_MS: () => POLL_JITTER_MS,
   POLL_MAX_S: () => POLL_MAX_S,
   POLL_MIN_S: () => POLL_MIN_S,
   TEST_ORIGIN_ENV: () => TEST_ORIGIN_ENV,
+  ffmpegCommand: () => ffmpegCommand,
   imageRetentionHours: () => imageRetentionHours,
+  liveBindAddress: () => liveBindAddress,
+  liveMaxSeconds: () => liveMaxSeconds,
+  livePort: () => livePort,
   normalizeEmail: () => normalizeEmail,
   normalizePin: () => normalizePin,
   pollDelayMs: () => pollDelayMs,
@@ -34,6 +42,8 @@ __export(config_exports, {
   testOrigin: () => testOrigin
 });
 module.exports = __toCommonJS(config_exports);
+var import_node_net = require("node:net");
+var import_node_path = require("node:path");
 const POLL_DEFAULT_S = 60;
 const POLL_MIN_S = 30;
 const POLL_MAX_S = 3600;
@@ -53,6 +63,32 @@ function imageRetentionHours(value) {
     return IMAGE_RETENTION_DEFAULT_H;
   }
   return Math.min(Math.max(hours, IMAGE_RETENTION_MIN_H), IMAGE_RETENTION_MAX_H);
+}
+const LIVE_MAX_DEFAULT_S = 120;
+const LIVE_MAX_MIN_S = 30;
+const LIVE_MAX_MAX_S = 600;
+const LIVE_PORT_DEFAULT = 8766;
+function liveMaxSeconds(value) {
+  const seconds = Math.round(Number(value));
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return LIVE_MAX_DEFAULT_S;
+  }
+  return Math.min(Math.max(seconds, LIVE_MAX_MIN_S), LIVE_MAX_MAX_S);
+}
+function liveBindAddress(value) {
+  const address = typeof value === "string" ? value.trim() : "";
+  return (0, import_node_net.isIP)(address) ? address : "127.0.0.1";
+}
+function livePort(value) {
+  const port = Math.round(Number(value));
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : LIVE_PORT_DEFAULT;
+}
+function ffmpegCommand(value) {
+  const path = typeof value === "string" ? value.trim() : "";
+  if (!path) {
+    return "ffmpeg";
+  }
+  return (0, import_node_path.isAbsolute)(path) && /^ffmpeg(\.exe)?$/i.test((0, import_node_path.basename)(path)) ? path : void 0;
 }
 const POLL_JITTER_MS = 5e3;
 function pollDelayMs(seconds, random = Math.random) {
@@ -75,12 +111,20 @@ function testOrigin(value) {
   IMAGE_RETENTION_DEFAULT_H,
   IMAGE_RETENTION_MAX_H,
   IMAGE_RETENTION_MIN_H,
+  LIVE_MAX_DEFAULT_S,
+  LIVE_MAX_MAX_S,
+  LIVE_MAX_MIN_S,
+  LIVE_PORT_DEFAULT,
   POLL_DEFAULT_S,
   POLL_JITTER_MS,
   POLL_MAX_S,
   POLL_MIN_S,
   TEST_ORIGIN_ENV,
+  ffmpegCommand,
   imageRetentionHours,
+  liveBindAddress,
+  liveMaxSeconds,
+  livePort,
   normalizeEmail,
   normalizePin,
   pollDelayMs,
