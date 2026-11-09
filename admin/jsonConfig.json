@@ -67,6 +67,25 @@
             "md": 6,
             "lg": 4,
             "xl": 4
+        },
+        "_headerImages": {
+            "type": "header",
+            "text": "Images",
+            "size": 2,
+            "newLine": true
+        },
+        "imageRetentionHours": {
+            "type": "number",
+            "label": "Keep images for",
+            "help": "Hours, 1 to 720. Images of the cameras are personal data and are deleted after this time.",
+            "min": 1,
+            "max": 720,
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
         }
     }
 }

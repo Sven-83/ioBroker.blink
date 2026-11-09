@@ -4,6 +4,9 @@ import {
     POLL_JITTER_MS,
     POLL_MAX_S,
     POLL_MIN_S,
+    IMAGE_RETENTION_DEFAULT_H,
+    IMAGE_RETENTION_MAX_H,
+    imageRetentionHours,
     normalizeEmail,
     normalizePin,
     pollDelayMs,
@@ -11,6 +14,14 @@ import {
 } from './config';
 
 describe('util/config', () => {
+    it('clamps the retention of images and has a default', () => {
+        expect(imageRetentionHours(48)).to.equal(48);
+        expect(imageRetentionHours(99_999)).to.equal(IMAGE_RETENTION_MAX_H);
+        for (const value of [undefined, null, '', 'abc', 0, -1]) {
+            expect(imageRetentionHours(value), String(value)).to.equal(IMAGE_RETENTION_DEFAULT_H);
+        }
+    });
+
     it('clamps the polling interval', () => {
         expect(pollIntervalSeconds(120)).to.equal(120);
         expect(pollIntervalSeconds(5)).to.equal(POLL_MIN_S);

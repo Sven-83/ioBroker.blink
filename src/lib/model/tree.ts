@@ -26,6 +26,8 @@ interface StateDef<T> {
     unit?: string;
     /** Can be switched by the user */
     write?: boolean;
+    /** A button has nothing to read */
+    read?: boolean;
     /** Text of the possible values */
     states?: Record<string, string>;
     /** Polled value. Without it the state belongs to a command: created always, never written when polling */
@@ -111,6 +113,25 @@ const DEVICE_STATES: StateDef<BlinkDevice>[] = [
     },
     { key: 'wifi', name: 'Wi-Fi signal bars', type: 'number', role: 'value', get: item => item.wifi },
     { key: 'lfr', name: 'Signal bars to the Sync Module', type: 'number', role: 'value', get: item => item.lfr },
+    { key: 'snapshot', name: 'Take a snapshot', type: 'boolean', role: 'button', read: false, write: true },
+    { key: 'snapshotPending', name: 'Snapshot running', type: 'boolean', role: 'indicator.working', initial: false },
+    {
+        key: 'snapshotResult',
+        name: 'Result of the last snapshot',
+        type: 'string',
+        role: 'text',
+        states: {
+            confirmed: 'new image',
+            unconfirmed: 'no new image',
+            rejected: 'failed',
+            busy: 'Blink is busy',
+            offline: 'camera offline',
+            throttled: 'image is still recent',
+        },
+    },
+    { key: 'image', name: 'Address of the last image', type: 'string', role: 'url' },
+    { key: 'imageTime', name: 'Time of the last image, 0 if unknown', type: 'number', role: 'value.time' },
+    { key: 'imageInfo', name: 'Internal data of the last image', type: 'string', role: 'json' },
 ];
 
 /** Keeps the object tree in line with the homescreen, with as few database writes as possible */
@@ -174,7 +195,7 @@ export class ObjectTree {
                         name: def.name,
                         type: def.type,
                         role: def.role,
-                        read: true,
+                        read: def.read ?? true,
                         write: def.write ?? false,
                         ...(def.unit ? { unit: def.unit } : {}),
                         ...(def.states ? { states: def.states } : {}),

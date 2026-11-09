@@ -18,6 +18,7 @@ function device(values: Partial<BlinkDevice> = {}): BlinkDevice {
         temperature: undefined,
         wifi: undefined,
         lfr: undefined,
+        thumbnail: undefined,
         ...values,
     };
 }
@@ -63,6 +64,13 @@ describe('model/tree', () => {
             'cameras.1.kind',
             'cameras.1.batteryLow',
             'cameras.1.temperature',
+            // states of the snapshots exist without a value from Blink
+            'cameras.1.snapshot',
+            'cameras.1.snapshotPending',
+            'cameras.1.snapshotResult',
+            'cameras.1.image',
+            'cameras.1.imageTime',
+            'cameras.1.imageInfo',
         ]);
         expect(host.writes).to.deep.include(['cameras.1.temperature', 0]);
         expect(host.writes).to.deep.include(['cameras.1.batteryLow', false]);

@@ -18,7 +18,9 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var rest_exports = {};
 __export(rest_exports, {
-  RestClient: () => RestClient
+  IMAGE_MAX_BYTES: () => IMAGE_MAX_BYTES,
+  RestClient: () => RestClient,
+  imageUrl: () => imageUrl
 });
 module.exports = __toCommonJS(rest_exports);
 var import_constants = require("./constants");
@@ -26,6 +28,39 @@ var import_errors = require("./errors");
 var import_homescreen = require("./homescreen");
 var import_http = require("./http");
 const UNKNOWN_PATH = [404, 405, 410];
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+const BLINK_HOST = /(^|\.)immedia-semi\.com$/;
+function imageUrl(thumbnail, restOrigin) {
+  let url;
+  try {
+    url = new URL(thumbnail, restOrigin);
+  } catch {
+    return void 0;
+  }
+  if (url.protocol !== "https:" || !(url.origin === restOrigin || BLINK_HOST.test(url.hostname))) {
+    return void 0;
+  }
+  if (!/\.jpe?g$/i.test(url.pathname)) {
+    url.pathname += ".jpg";
+  }
+  return url.toString();
+}
+function snapshotPaths(accountId, networkId, kind, deviceId) {
+  const network = `/network/${networkId}`;
+  const account = `/api/v1/accounts/${accountId}/networks/${networkId}`;
+  const camera = `${network}/camera/${deviceId}/thumbnail`;
+  if (kind === "camera") {
+    return [camera, `${network}/cameras/${deviceId}/thumbnail`, `${account}/cameras/${deviceId}/thumbnail`];
+  }
+  const family = kind === "mini" ? "owl" : "doorbell";
+  return [
+    `${account}/${family}s/${deviceId}/thumbnail`,
+    `${account}/${family}/${deviceId}/thumbnail`,
+    `${network}/${family}s/${deviceId}/thumbnail`,
+    `${network}/${family}/${deviceId}/thumbnail`,
+    camera
+  ];
+}
 function headers(session) {
   return {
     Authorization: `Bearer ${session.accessToken}`,
@@ -34,17 +69,20 @@ function headers(session) {
   };
 }
 function check(response, what) {
-  if (response.status === 401) {
+  checkStatus(response.status, response, what);
+}
+function checkStatus(status, response, what) {
+  if (status === 401) {
     throw new import_errors.SessionExpiredError("access token rejected");
   }
-  if (response.status === 429) {
-    throw new import_errors.RateLimitedError((0, import_http.retryAfterMs)(response));
+  if (status === 429) {
+    throw new import_errors.RateLimitedError(response ? (0, import_http.retryAfterMs)(response) : import_constants.RATE_LIMIT_FALLBACK_S * 1e3);
   }
-  if (response.status === 409) {
+  if (status === 409) {
     throw new import_errors.BusyError();
   }
-  if (response.status < 200 || response.status >= 300) {
-    throw new import_errors.ApiError(what, response.status);
+  if (status < 200 || status >= 300) {
+    throw new import_errors.ApiError(what, status);
   }
 }
 class RestClient {
@@ -82,12 +120,66 @@ class RestClient {
    * @returns Command ID, if Blink gave one
    */
   async setArmed(session, networkId, armed) {
-    var _a;
     const action = armed ? "arm" : "disarm";
-    const paths = [
-      `/api/v1/accounts/${session.accountId}/networks/${networkId}/state/${action}`,
-      `/network/${networkId}/${action}`
-    ];
+    return this.command(
+      session,
+      [
+        `/api/v1/accounts/${session.accountId}/networks/${networkId}/state/${action}`,
+        `/network/${networkId}/${action}`
+      ],
+      `Sending ${action} to Blink`
+    );
+  }
+  /**
+   * Asks a device for a new image. This wakes a battery camera, so it only runs on request.
+   *
+   * @param session - Logged-in session
+   * @param networkId - Network ID
+   * @param kind - Device family
+   * @param deviceId - Device ID
+   * @returns Command ID, if Blink gave one
+   */
+  snapshot(session, networkId, kind, deviceId) {
+    return this.command(
+      session,
+      snapshotPaths(session.accountId, networkId, kind, deviceId),
+      "Asking Blink for a snapshot"
+    );
+  }
+  /**
+   * Downloads the image a "thumbnail" field points to. This does not wake the camera: Blink has the image.
+   *
+   * @param session - Logged-in session
+   * @param thumbnail - Value of the field
+   * @returns The JPEG file
+   */
+  async downloadImage(session, thumbnail) {
+    const what = "Downloading a Blink image";
+    const url = imageUrl(thumbnail, session.restOrigin);
+    if (!url) {
+      throw new import_errors.ApiError(`${what} (address outside of Blink)`, 0);
+    }
+    const response = await this.http.download(
+      url,
+      { ...headers(session), Accept: "image/jpeg,image/*" },
+      IMAGE_MAX_BYTES
+    );
+    checkStatus(response.status, void 0, what);
+    if (response.body[0] !== 255 || response.body[1] !== 216 || response.body[2] !== 255) {
+      throw new import_errors.ApiError(`${what} (not a JPEG)`, response.status);
+    }
+    return response.body;
+  }
+  /**
+   * Sends a command. Only an unknown path tries the next one, as any other answer may mean it has arrived.
+   *
+   * @param session - Logged-in session
+   * @param paths - Paths to try, in this order
+   * @param what - Action for the error message
+   * @returns Command ID, if Blink gave one
+   */
+  async command(session, paths, what) {
+    var _a;
     let response;
     for (const path of paths) {
       response = await this.http.request(`${session.restOrigin}${path}`, {
@@ -98,7 +190,7 @@ class RestClient {
         break;
       }
     }
-    check(response, `Sending ${action} to Blink`);
+    check(response, what);
     const body = (0, import_http.parseJson)(response.body);
     return (0, import_homescreen.toId)((_a = (0, import_http.field)(body, "id")) != null ? _a : (0, import_http.field)(body, "command_id"));
   }
@@ -115,15 +207,17 @@ class RestClient {
     });
     check(response, "Reading the Blink command status");
     const body = (0, import_http.parseJson)(response.body);
-    if ((0, import_http.field)(body, "complete") === true) {
-      return "done";
-    }
     const status = (0, import_http.field)(body, "status");
-    return typeof status === "number" && status !== 0 ? "failed" : "running";
+    if (typeof status === "number" && status !== 0) {
+      return "failed";
+    }
+    return (0, import_http.field)(body, "complete") === true ? "done" : "running";
   }
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  RestClient
+  IMAGE_MAX_BYTES,
+  RestClient,
+  imageUrl
 });
 //# sourceMappingURL=rest.js.map

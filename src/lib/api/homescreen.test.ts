@@ -35,6 +35,7 @@ describe('api/homescreen', () => {
                     enabled: true,
                     status: 'done',
                     battery: 'ok',
+                    thumbnail: '/media/1/a?ts=1',
                     signals: { lfr: 5, wifi: 4, temp: 68, battery: 3 },
                 },
             ],
@@ -54,6 +55,7 @@ describe('api/homescreen', () => {
             temperature: 20,
             wifi: 4,
             lfr: 5,
+            thumbnail: '/media/1/a?ts=1',
         });
     });
 

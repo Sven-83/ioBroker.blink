@@ -88,7 +88,8 @@
         "email": "",
         "password": "",
         "pin": "",
-        "pollInterval": 60
+        "pollInterval": 60,
+        "imageRetentionHours": 24
     },
     "encryptedNative": [
         "password"
@@ -98,6 +99,15 @@
     ],
     "objects": [],
     "instanceObjects": [
+        {
+            "_id": "",
+            "type": "meta",
+            "common": {
+                "name": "Images of the cameras",
+                "type": "meta.user"
+            },
+            "native": {}
+        },
         {
             "_id": "info",
             "type": "channel",

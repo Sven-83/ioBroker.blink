@@ -18,11 +18,15 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var config_exports = {};
 __export(config_exports, {
+  IMAGE_RETENTION_DEFAULT_H: () => IMAGE_RETENTION_DEFAULT_H,
+  IMAGE_RETENTION_MAX_H: () => IMAGE_RETENTION_MAX_H,
+  IMAGE_RETENTION_MIN_H: () => IMAGE_RETENTION_MIN_H,
   POLL_DEFAULT_S: () => POLL_DEFAULT_S,
   POLL_JITTER_MS: () => POLL_JITTER_MS,
   POLL_MAX_S: () => POLL_MAX_S,
   POLL_MIN_S: () => POLL_MIN_S,
   TEST_ORIGIN_ENV: () => TEST_ORIGIN_ENV,
+  imageRetentionHours: () => imageRetentionHours,
   normalizeEmail: () => normalizeEmail,
   normalizePin: () => normalizePin,
   pollDelayMs: () => pollDelayMs,
@@ -39,6 +43,16 @@ function pollIntervalSeconds(value) {
     return POLL_DEFAULT_S;
   }
   return Math.min(Math.max(seconds, POLL_MIN_S), POLL_MAX_S);
+}
+const IMAGE_RETENTION_DEFAULT_H = 24;
+const IMAGE_RETENTION_MIN_H = 1;
+const IMAGE_RETENTION_MAX_H = 720;
+function imageRetentionHours(value) {
+  const hours = Math.round(Number(value));
+  if (!Number.isFinite(hours) || hours <= 0) {
+    return IMAGE_RETENTION_DEFAULT_H;
+  }
+  return Math.min(Math.max(hours, IMAGE_RETENTION_MIN_H), IMAGE_RETENTION_MAX_H);
 }
 const POLL_JITTER_MS = 5e3;
 function pollDelayMs(seconds, random = Math.random) {
@@ -58,11 +72,15 @@ function testOrigin(value) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  IMAGE_RETENTION_DEFAULT_H,
+  IMAGE_RETENTION_MAX_H,
+  IMAGE_RETENTION_MIN_H,
   POLL_DEFAULT_S,
   POLL_JITTER_MS,
   POLL_MAX_S,
   POLL_MIN_S,
   TEST_ORIGIN_ENV,
+  imageRetentionHours,
   normalizeEmail,
   normalizePin,
   pollDelayMs,

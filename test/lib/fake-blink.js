@@ -40,6 +40,7 @@ function defaultHomescreen() {
                 enabled: true,
                 status: 'done',
                 battery: 'ok',
+                thumbnail: '/media/3001/thumb-1?ts=1700000000',
                 signals: { lfr: 5, wifi: 4, temp: 68, battery: 3 },
             },
         ],
@@ -52,6 +53,7 @@ function defaultHomescreen() {
                 type: 'owl',
                 enabled: false,
                 status: 'online',
+                thumbnail: '/media/3002/thumb-1.jpg',
             },
         ],
         doorbells: [
@@ -65,6 +67,7 @@ function defaultHomescreen() {
                 status: 'done',
                 battery: 'low',
                 battery_voltage: 148,
+                thumbnail: '/media/3003/thumb-1?ts=1700000000',
                 signals: { wifi: 2, temp: 50, battery: 1 },
             },
         ],
@@ -85,6 +88,14 @@ function defaultHomescreen() {
  * @param {number} [options.armDelayMs] - Time until a command is finished and "armed" changes
  * @param {boolean} [options.armIgnored] - Commands are accepted, but "armed" never changes
  * @param {boolean} [options.armCommandFails] - Commands report a failure, "armed" does not change
+ * @param {number} [options.snapshotBusyCount] - Number of snapshot requests answered with "System is busy"
+ * @param {number} [options.snapshotDelayMs] - Time until a new image is there
+ * @param {boolean} [options.snapshotIgnored] - Snapshots are accepted, but no new image comes
+ * @param {boolean} [options.snapshotSameContent] - The address of the image changes, its content does not
+ * @param {boolean} [options.snapshotCommandFails] - Snapshot commands report a failure, no new image comes
+ * @param {number} [options.imageStatus] - HTTP status of image downloads (other than 200: error answer)
+ * @param {string} [options.imageBody] - Answer of image downloads instead of an image
+ * @param {object} [options.commandAnswer] - Fixed answer of the command status
  */
 async function startFakeBlink(options = {}) {
     const config = {
@@ -98,6 +109,12 @@ async function startFakeBlink(options = {}) {
         armDelayMs: 0,
         armIgnored: false,
         armCommandFails: false,
+        snapshotBusyCount: 0,
+        snapshotDelayMs: 0,
+        snapshotIgnored: false,
+        snapshotSameContent: false,
+        snapshotCommandFails: false,
+        imageStatus: 200,
         ...options,
     };
     const commands = new Map(); // id -> { doneAt, failed }
@@ -120,6 +137,41 @@ async function startFakeBlink(options = {}) {
         armNew: 0,
         armOld: 0,
         commandStatus: 0,
+        snapshot: 0,
+        image: 0,
+    };
+
+    const allDevices = () => [
+        ...(config.homescreen.cameras ?? []),
+        ...(config.homescreen.owls ?? []),
+        ...(config.homescreen.doorbells ?? []),
+    ];
+
+    /** Accepts a snapshot and changes the image as configured */
+    const acceptSnapshot = (res, deviceId) => {
+        const device = allDevices().find(item => item.id === deviceId);
+        if (!device) {
+            return send(res, 404, { message: 'unknown device' });
+        }
+        if (config.snapshotBusyCount > 0) {
+            config.snapshotBusyCount--;
+            return send(res, 409, { message: 'System is busy' });
+        }
+        const id = ++nextCommandId;
+        const failed = config.snapshotCommandFails;
+        commands.set(id, { doneAt: Date.now() + config.snapshotDelayMs, failed });
+        if (!failed && !config.snapshotIgnored) {
+            const apply = () => {
+                const next = Number(device.thumbnail.match(/thumb-(\d+)/)[1]) + 1;
+                device.thumbnail = `/media/${deviceId}/thumb-${next}?ts=${Math.floor(Date.now() / 1000)}`;
+            };
+            if (config.snapshotDelayMs > 0) {
+                setTimeout(apply, config.snapshotDelayMs).unref();
+            } else {
+                apply();
+            }
+        }
+        return send(res, 200, { id, network_id: device.network_id, state: 'new' });
     };
 
     /** Accepts a command and changes "armed" as configured */
@@ -316,11 +368,49 @@ async function startFakeBlink(options = {}) {
             return acceptArm(res, Number(match[1]), match[2]);
         }
 
+        const snapshotPath = url.pathname.match(
+            new RegExp(
+                `^(?:/network/\\d+/camera/|/api/v1/accounts/${ACCOUNT_ID}/networks/\\d+/owls/|` +
+                    `/api/v1/accounts/${ACCOUNT_ID}/networks/\\d+/doorbells/)(\\d+)/thumbnail$`,
+            ),
+        );
+        if (req.method === 'POST' && snapshotPath) {
+            stats.snapshot++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            return acceptSnapshot(res, Number(snapshotPath[1]));
+        }
+
+        const imagePath = url.pathname.match(/^\/media\/(\d+)\/thumb-(\d+)\.jpg$/);
+        if (req.method === 'GET' && imagePath) {
+            stats.image++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            if (config.imageStatus !== 200) {
+                return send(res, config.imageStatus, { message: 'error' });
+            }
+            if (config.imageBody) {
+                res.writeHead(200, { 'Content-Type': 'text/html' });
+                return res.end(config.imageBody);
+            }
+            // invented bytes with the start of a JPEG, no real image
+            const version = config.snapshotSameContent ? '1' : imagePath[2];
+            res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+            return res.end(
+                Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(`fake-${imagePath[1]}-${version}`)]),
+            );
+        }
+
         const commandPath = url.pathname.match(/^\/network\/\d+\/command\/(\d+)$/);
         if (req.method === 'GET' && commandPath) {
             stats.commandStatus++;
             if (!accessTokens.has(bearer)) {
                 return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            if (config.commandAnswer) {
+                return send(res, 200, config.commandAnswer);
             }
             const command = commands.get(Number(commandPath[1]));
             if (!command) {

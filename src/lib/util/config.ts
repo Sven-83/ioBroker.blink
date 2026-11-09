@@ -23,6 +23,24 @@ export function pollIntervalSeconds(value: unknown): number {
     return Math.min(Math.max(seconds, POLL_MIN_S), POLL_MAX_S);
 }
 
+/** Retention limits of images in hours (audit B.10.22) */
+export const IMAGE_RETENTION_DEFAULT_H = 24;
+export const IMAGE_RETENTION_MIN_H = 1;
+export const IMAGE_RETENTION_MAX_H = 720;
+
+/**
+ * Retention period of images from the config, clamped to the allowed range.
+ *
+ * @param value - Value from the instance config
+ */
+export function imageRetentionHours(value: unknown): number {
+    const hours = Math.round(Number(value));
+    if (!Number.isFinite(hours) || hours <= 0) {
+        return IMAGE_RETENTION_DEFAULT_H;
+    }
+    return Math.min(Math.max(hours, IMAGE_RETENTION_MIN_H), IMAGE_RETENTION_MAX_H);
+}
+
 /** Largest random addition to the polling interval (audit B.11.1) */
 export const POLL_JITTER_MS = 5_000;
 

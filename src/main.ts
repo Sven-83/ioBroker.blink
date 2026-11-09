@@ -2,7 +2,7 @@
  * ioBroker.blink
  * Adapter lifecycle only - Blink API in lib/api, object tree in lib/model, helpers in lib/util.
  *
- * Phase 4: login with 2FA, encrypted session, token refresh, backoff, polling, arm/disarm with readback.
+ * Phase 5: login with 2FA, encrypted session, token refresh, backoff, polling, arm/disarm with readback, snapshots.
  */
 
 import * as utils from '@iobroker/adapter-core';
@@ -27,9 +27,12 @@ import {
     type SecretCodec,
 } from './lib/model/session-store';
 import { ArmQueue } from './lib/model/arm-queue';
+import { ImageStore } from './lib/model/image-store';
+import { SnapshotQueue } from './lib/model/snapshot-queue';
 import { ObjectTree } from './lib/model/tree';
 import {
     TEST_ORIGIN_ENV,
+    imageRetentionHours,
     normalizeEmail,
     normalizePin,
     pollDelayMs,
@@ -61,6 +64,9 @@ class Blink extends utils.Adapter {
     private rest: RestClient | undefined;
     private tree: ObjectTree | undefined;
     private arm: ArmQueue | undefined;
+    private images: ImageStore | undefined;
+    private snapshots: SnapshotQueue | undefined;
+    private homescreen: Homescreen | undefined;
     /** Requests of the cloud run one after the other, see exclusive() */
     private lane: Promise<unknown> = Promise.resolve();
     private session: Session | undefined;
@@ -148,6 +154,53 @@ class Blink extends utils.Adapter {
             },
             this.tree,
         );
+        const download = (thumbnail: string): Promise<Buffer> =>
+            this.exclusive(() => this.authorized(session => this.rest!.downloadImage(session, thumbnail)));
+        this.images = new ImageStore(
+            {
+                download,
+                writeFile: (name, data) => this.writeFileAsync(this.namespace, name, data),
+                deleteFile: name => this.delFileAsync(this.namespace, name),
+                readInfos: async () => {
+                    const infos = new Map<number, unknown>();
+                    const states = await this.getStatesAsync('cameras.*.imageInfo');
+                    for (const [id, state] of Object.entries(states ?? {})) {
+                        const match = id.match(/\.cameras\.(\d+)\.imageInfo$/);
+                        if (match) {
+                            infos.set(Number(match[1]), state?.val);
+                        }
+                    }
+                    return infos;
+                },
+                urlOf: name => `/${this.namespace}/${name}`,
+                debug: message => this.log.debug(message),
+                warn: message => this.log.warn(message),
+            },
+            this.tree,
+            imageRetentionHours(this.config.imageRetentionHours) * 3_600_000,
+        );
+        this.snapshots = new SnapshotQueue(
+            {
+                online: () => this.cloudConnected,
+                device: cameraId => this.homescreen?.devices.find(device => device.id === cameraId),
+                read: () => this.exclusive(() => this.readCloud()),
+                trigger: (device, networkId) =>
+                    this.exclusive(() =>
+                        this.authorized(session => this.rest!.snapshot(session, networkId, device.kind, device.id)),
+                    ),
+                commandStatus: (networkId, commandId) =>
+                    this.exclusive(() =>
+                        this.authorized(session => this.rest!.commandStatus(session, networkId, commandId)),
+                    ),
+                download,
+                wait: ms => this.delay(ms),
+                debug: message => this.log.debug(message),
+                warn: message => this.log.warn(message),
+            },
+            this.tree,
+            this.images,
+        );
+        await this.subscribeStatesAsync('cameras.*.snapshot');
         await this.subscribeStatesAsync('networks.*.armed');
         await this.setLoginState('connecting');
         this.schedule(Math.floor(Math.random() * START_JITTER_MS), () => this.connect());
@@ -308,9 +361,27 @@ class Blink extends utils.Adapter {
                 `Poll took ${Date.now() - started} ms: ${homescreen.networks.length} networks, ` +
                     `${homescreen.syncModules.length} Sync Modules, ${homescreen.devices.length} devices`,
             );
+            await this.updateImages(homescreen);
             this.schedule(pollDelayMs(this.pollSeconds), () => this.poll());
         } catch (err) {
             await this.handleFailure(err);
+        }
+    }
+
+    /**
+     * Images are extras: a problem with them must not look like a lost connection.
+     *
+     * @param homescreen - Current homescreen
+     */
+    private async updateImages(homescreen: Homescreen): Promise<void> {
+        try {
+            await this.images!.sync(homescreen.devices);
+            await this.images!.expire(Date.now());
+        } catch (err) {
+            if (err instanceof AbortedError) {
+                throw err;
+            }
+            this.log.warn(`Images not updated: ${describeError(err)}`);
         }
     }
 
@@ -333,6 +404,7 @@ class Blink extends utils.Adapter {
             throw new AbortedError();
         }
         await this.tree!.apply(homescreen);
+        this.homescreen = homescreen;
         await this.setState('info.lastPoll', Date.now(), true);
         return homescreen;
     }
@@ -357,7 +429,8 @@ class Blink extends utils.Adapter {
     }
 
     /**
-     * User wants to arm or disarm a network. ack: true follows with the state read back from Blink.
+     * User wants to arm or disarm a network or asks for a snapshot. ack: true for "armed" follows with the
+     * state read back from Blink.
      *
      * @param id - Full state ID
      * @param state - New state
@@ -366,7 +439,13 @@ class Blink extends utils.Adapter {
         if (!state || state.ack || !this.arm) {
             return;
         }
-        const match = id.slice(this.namespace.length + 1).match(/^networks\.(\d+)\.armed$/);
+        const relative = id.slice(this.namespace.length + 1);
+        const snapshot = relative.match(/^cameras\.(\d+)\.snapshot$/);
+        if (snapshot) {
+            this.onSnapshot(relative, Number(snapshot[1]), state);
+            return;
+        }
+        const match = relative.match(/^networks\.(\d+)\.armed$/);
         if (!match) {
             return;
         }
@@ -381,6 +460,25 @@ class Blink extends utils.Adapter {
         } else {
             this.log.warn(`Network ${networkId}: "armed" needs true or false`);
             this.arm.restore(networkId).catch(fail);
+        }
+    }
+
+    /**
+     * The button was pressed: confirmed at once, the result follows in snapshotResult.
+     *
+     * @param id - Relative state ID
+     * @param cameraId - Camera ID
+     * @param state - New state
+     */
+    private onSnapshot(id: string, cameraId: number, state: ioBroker.State): void {
+        const fail = (err: unknown): void => {
+            if (!this.abort.signal.aborted) {
+                this.log.error(`Camera ${cameraId}: ${describeError(err)}`);
+            }
+        };
+        this.tree?.release(id, state.val).catch(fail);
+        if (state.val) {
+            this.snapshots?.request(cameraId).catch(fail);
         }
     }
 

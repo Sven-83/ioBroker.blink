@@ -28,6 +28,8 @@ var import_oauth = require("./lib/api/oauth");
 var import_rest = require("./lib/api/rest");
 var import_session_store = require("./lib/model/session-store");
 var import_arm_queue = require("./lib/model/arm-queue");
+var import_image_store = require("./lib/model/image-store");
+var import_snapshot_queue = require("./lib/model/snapshot-queue");
 var import_tree = require("./lib/model/tree");
 var import_config = require("./lib/util/config");
 const RETRY_START_S = 60;
@@ -40,6 +42,9 @@ class Blink extends utils.Adapter {
   rest;
   tree;
   arm;
+  images;
+  snapshots;
+  homescreen;
   /** Requests of the cloud run one after the other, see exclusive() */
   lane = Promise.resolve();
   session;
@@ -122,6 +127,53 @@ class Blink extends utils.Adapter {
       },
       this.tree
     );
+    const download = (thumbnail) => this.exclusive(() => this.authorized((session) => this.rest.downloadImage(session, thumbnail)));
+    this.images = new import_image_store.ImageStore(
+      {
+        download,
+        writeFile: (name, data) => this.writeFileAsync(this.namespace, name, data),
+        deleteFile: (name) => this.delFileAsync(this.namespace, name),
+        readInfos: async () => {
+          const infos = /* @__PURE__ */ new Map();
+          const states = await this.getStatesAsync("cameras.*.imageInfo");
+          for (const [id, state] of Object.entries(states != null ? states : {})) {
+            const match = id.match(/\.cameras\.(\d+)\.imageInfo$/);
+            if (match) {
+              infos.set(Number(match[1]), state == null ? void 0 : state.val);
+            }
+          }
+          return infos;
+        },
+        urlOf: (name) => `/${this.namespace}/${name}`,
+        debug: (message) => this.log.debug(message),
+        warn: (message) => this.log.warn(message)
+      },
+      this.tree,
+      (0, import_config.imageRetentionHours)(this.config.imageRetentionHours) * 36e5
+    );
+    this.snapshots = new import_snapshot_queue.SnapshotQueue(
+      {
+        online: () => this.cloudConnected,
+        device: (cameraId) => {
+          var _a;
+          return (_a = this.homescreen) == null ? void 0 : _a.devices.find((device) => device.id === cameraId);
+        },
+        read: () => this.exclusive(() => this.readCloud()),
+        trigger: (device, networkId) => this.exclusive(
+          () => this.authorized((session) => this.rest.snapshot(session, networkId, device.kind, device.id))
+        ),
+        commandStatus: (networkId, commandId) => this.exclusive(
+          () => this.authorized((session) => this.rest.commandStatus(session, networkId, commandId))
+        ),
+        download,
+        wait: (ms) => this.delay(ms),
+        debug: (message) => this.log.debug(message),
+        warn: (message) => this.log.warn(message)
+      },
+      this.tree,
+      this.images
+    );
+    await this.subscribeStatesAsync("cameras.*.snapshot");
     await this.subscribeStatesAsync("networks.*.armed");
     await this.setLoginState("connecting");
     this.schedule(Math.floor(Math.random() * START_JITTER_MS), () => this.connect());
@@ -271,9 +323,26 @@ class Blink extends utils.Adapter {
       this.log.debug(
         `Poll took ${Date.now() - started} ms: ${homescreen.networks.length} networks, ${homescreen.syncModules.length} Sync Modules, ${homescreen.devices.length} devices`
       );
+      await this.updateImages(homescreen);
       this.schedule((0, import_config.pollDelayMs)(this.pollSeconds), () => this.poll());
     } catch (err) {
       await this.handleFailure(err);
+    }
+  }
+  /**
+   * Images are extras: a problem with them must not look like a lost connection.
+   *
+   * @param homescreen - Current homescreen
+   */
+  async updateImages(homescreen) {
+    try {
+      await this.images.sync(homescreen.devices);
+      await this.images.expire(Date.now());
+    } catch (err) {
+      if (err instanceof import_errors.AbortedError) {
+        throw err;
+      }
+      this.log.warn(`Images not updated: ${(0, import_errors.describeError)(err)}`);
     }
   }
   /**
@@ -294,6 +363,7 @@ class Blink extends utils.Adapter {
       throw new import_errors.AbortedError();
     }
     await this.tree.apply(homescreen);
+    this.homescreen = homescreen;
     await this.setState("info.lastPoll", Date.now(), true);
     return homescreen;
   }
@@ -316,7 +386,8 @@ class Blink extends utils.Adapter {
     }
   }
   /**
-   * User wants to arm or disarm a network. ack: true follows with the state read back from Blink.
+   * User wants to arm or disarm a network or asks for a snapshot. ack: true for "armed" follows with the
+   * state read back from Blink.
    *
    * @param id - Full state ID
    * @param state - New state
@@ -325,7 +396,13 @@ class Blink extends utils.Adapter {
     if (!state || state.ack || !this.arm) {
       return;
     }
-    const match = id.slice(this.namespace.length + 1).match(/^networks\.(\d+)\.armed$/);
+    const relative = id.slice(this.namespace.length + 1);
+    const snapshot = relative.match(/^cameras\.(\d+)\.snapshot$/);
+    if (snapshot) {
+      this.onSnapshot(relative, Number(snapshot[1]), state);
+      return;
+    }
+    const match = relative.match(/^networks\.(\d+)\.armed$/);
     if (!match) {
       return;
     }
@@ -340,6 +417,25 @@ class Blink extends utils.Adapter {
     } else {
       this.log.warn(`Network ${networkId}: "armed" needs true or false`);
       this.arm.restore(networkId).catch(fail);
+    }
+  }
+  /**
+   * The button was pressed: confirmed at once, the result follows in snapshotResult.
+   *
+   * @param id - Relative state ID
+   * @param cameraId - Camera ID
+   * @param state - New state
+   */
+  onSnapshot(id, cameraId, state) {
+    var _a, _b;
+    const fail = (err) => {
+      if (!this.abort.signal.aborted) {
+        this.log.error(`Camera ${cameraId}: ${(0, import_errors.describeError)(err)}`);
+      }
+    };
+    (_a = this.tree) == null ? void 0 : _a.release(id, state.val).catch(fail);
+    if (state.val) {
+      (_b = this.snapshots) == null ? void 0 : _b.request(cameraId).catch(fail);
     }
   }
   currentSession() {

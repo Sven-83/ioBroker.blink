@@ -93,7 +93,26 @@ const DEVICE_STATES = [
     get: (item) => item.temperature
   },
   { key: "wifi", name: "Wi-Fi signal bars", type: "number", role: "value", get: (item) => item.wifi },
-  { key: "lfr", name: "Signal bars to the Sync Module", type: "number", role: "value", get: (item) => item.lfr }
+  { key: "lfr", name: "Signal bars to the Sync Module", type: "number", role: "value", get: (item) => item.lfr },
+  { key: "snapshot", name: "Take a snapshot", type: "boolean", role: "button", read: false, write: true },
+  { key: "snapshotPending", name: "Snapshot running", type: "boolean", role: "indicator.working", initial: false },
+  {
+    key: "snapshotResult",
+    name: "Result of the last snapshot",
+    type: "string",
+    role: "text",
+    states: {
+      confirmed: "new image",
+      unconfirmed: "no new image",
+      rejected: "failed",
+      busy: "Blink is busy",
+      offline: "camera offline",
+      throttled: "image is still recent"
+    }
+  },
+  { key: "image", name: "Address of the last image", type: "string", role: "url" },
+  { key: "imageTime", name: "Time of the last image, 0 if unknown", type: "number", role: "value.time" },
+  { key: "imageInfo", name: "Internal data of the last image", type: "string", role: "json" }
 ];
 class ObjectTree {
   /**
@@ -129,7 +148,7 @@ class ObjectTree {
     }
   }
   async section(folder, folderName, items, defs, seen) {
-    var _a;
+    var _a, _b;
     if (items.length > 0) {
       await this.ensureObject(folder, { type: "folder", common: { name: folderName }, native: {} });
     }
@@ -149,8 +168,8 @@ class ObjectTree {
             name: def.name,
             type: def.type,
             role: def.role,
-            read: true,
-            write: (_a = def.write) != null ? _a : false,
+            read: (_a = def.read) != null ? _a : true,
+            write: (_b = def.write) != null ? _b : false,
             ...def.unit ? { unit: def.unit } : {},
             ...def.states ? { states: def.states } : {}
           },

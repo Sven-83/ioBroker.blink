@@ -67,6 +67,8 @@ export interface BlinkDevice {
     wifi: number | undefined;
     /** Signal bars to the Sync Module */
     lfr: number | undefined;
+    /** Address of the last image at Blink. Stays in memory: it does not belong into states or the log */
+    thumbnail: string | undefined;
 }
 
 /** Normalized homescreen */
@@ -201,6 +203,7 @@ function parseDevice(entry: unknown, kind: DeviceKind): BlinkDevice | undefined 
         temperature: temperature(value('temp', 'temperature', 'temp_f'), value('temp_c', 'temperature_c')),
         wifi: toNumber(value('wifi', 'wifi_strength')),
         lfr: toNumber(value('lfr', 'lfr_strength')),
+        thumbnail: toText(value('thumbnail')),
     };
 }
 

@@ -125,7 +125,8 @@ function parseDevice(entry, kind) {
     batteryVoltage: toVolt(value("battery_voltage", "battery_volt")),
     temperature: temperature(value("temp", "temperature", "temp_f"), value("temp_c", "temperature_c")),
     wifi: toNumber(value("wifi", "wifi_strength")),
-    lfr: toNumber(value("lfr", "lfr_strength"))
+    lfr: toNumber(value("lfr", "lfr_strength")),
+    thumbnail: toText(value("thumbnail"))
   };
 }
 function parseHomescreen(body) {

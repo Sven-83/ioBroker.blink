@@ -104,6 +104,100 @@ describe('api/http HttpClient certificate checks', () => {
     });
 });
 
+describe('api/http HttpClient download', () => {
+    let server: Server;
+    let origin: string;
+    const seen: { url?: string; authorization?: string }[] = [];
+
+    before(done => {
+        server = createServer((request, response) => {
+            seen.push({ url: request.url, authorization: request.headers.authorization });
+            if (request.url === '/same-origin') {
+                response.writeHead(302, { Location: '/image' });
+                return response.end();
+            }
+            if (request.url === '/other-origin') {
+                response.writeHead(302, { Location: 'https://storage.example/image' });
+                return response.end();
+            }
+            if (request.url === '/plain-http') {
+                response.writeHead(302, { Location: 'http://storage.example/image' });
+                return response.end();
+            }
+            if (request.url === '/loop') {
+                response.writeHead(302, { Location: '/loop' });
+                return response.end();
+            }
+            if (request.url === '/large') {
+                response.writeHead(200, { 'Content-Length': '11' });
+                return response.end('12345678901');
+            }
+            response.end('image');
+        });
+        server.listen(0, '127.0.0.1', () => {
+            origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+            done();
+        });
+    });
+
+    beforeEach(() => {
+        seen.length = 0;
+    });
+
+    after(done => {
+        server.close(() => done());
+    });
+
+    const client = (): HttpClient => new HttpClient({ testOrigin: origin });
+    const auth = { Authorization: 'Bearer SECRET' };
+
+    it('returns the file', async () => {
+        const { status, body } = await client().download('https://rest.example/image', auth, 100);
+        expect(status).to.equal(200);
+        expect(body.toString()).to.equal('image');
+        expect(seen[0].authorization).to.equal('Bearer SECRET');
+    });
+
+    it('keeps the token on a redirect within the origin', async () => {
+        await client().download('https://rest.example/same-origin', auth, 100);
+        expect(seen.map(item => item.authorization)).to.deep.equal(['Bearer SECRET', 'Bearer SECRET']);
+    });
+
+    it('drops the token on a redirect to another origin', async () => {
+        const { body } = await client().download('https://rest.example/other-origin', auth, 100);
+        expect(body.toString()).to.equal('image');
+        expect(seen[1].authorization).to.equal(undefined);
+    });
+
+    it('does not follow a redirect to plain http', async () => {
+        const { status } = await client().download('https://rest.example/plain-http', auth, 100);
+        expect(status).to.equal(302);
+        expect(seen).to.have.lengthOf(1);
+    });
+
+    it('stops an endless redirect', async () => {
+        const { status } = await client().download('https://rest.example/loop', auth, 100);
+        expect(status).to.equal(302);
+    });
+
+    it('refuses a file that is too large', async () => {
+        let error: unknown;
+        try {
+            await client().download('https://rest.example/large', auth, 10);
+        } catch (err) {
+            error = err;
+        }
+        expect((error as Error).message).to.contain('larger than');
+    });
+
+    it('keeps the address of the image out of the trace', async () => {
+        const lines: string[] = [];
+        const http = new HttpClient({ testOrigin: origin, trace: line => lines.push(line) });
+        await http.download('https://rest.example/image?ts=SECRET', auth, 100);
+        expect(lines[0]).to.match(/^GET <image> -> 200 in \d+ ms, 5 bytes$/);
+    });
+});
+
 describe('api/http HttpClient trace', () => {
     let server: Server;
     let origin: string;

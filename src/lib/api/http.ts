@@ -2,7 +2,7 @@
  * Small HTTP layer on top of the global fetch: timeout, manual redirects, cookie jar, test origin.
  */
 
-import { RATE_LIMIT_FALLBACK_S, REQUEST_TIMEOUT_MS } from './constants';
+import { MAX_REDIRECTS, RATE_LIMIT_FALLBACK_S, REQUEST_TIMEOUT_MS } from './constants';
 import { AbortedError } from './errors';
 
 /** Response with the body already read as text */
@@ -161,13 +161,7 @@ export class HttpClient {
         return `${this.testOrigin}${parsed.pathname}${parsed.search}`;
     }
 
-    /**
-     * Sends a request without following redirects.
-     *
-     * @param url - Absolute https URL of the Blink cloud
-     * @param request - Method, headers, body and cookie jar
-     */
-    public async request(url: string, request: HttpRequest = {}): Promise<HttpResponse> {
+    private guard(): void {
         if (this.signal?.aborted) {
             throw new AbortedError();
         }
@@ -175,6 +169,74 @@ export class HttpClient {
         if (!this.testOrigin && process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
             throw new Error('TLS certificate checks are switched off in this process, nothing is sent to Blink');
         }
+    }
+
+    /**
+     * Downloads a binary file. Redirects are followed over https only, and the Authorization header
+     * never leaves the origin it was meant for. Addresses of images stay out of the log.
+     *
+     * @param url - Absolute https URL
+     * @param requestHeaders - Request headers
+     * @param maxBytes - Larger answers are refused
+     */
+    public async download(
+        url: string,
+        requestHeaders: Record<string, string>,
+        maxBytes: number,
+    ): Promise<{ status: number; body: Buffer }> {
+        let target = new URL(url);
+        let headers = { ...requestHeaders };
+        for (let hop = 0; ; hop++) {
+            this.guard();
+            const timeout = AbortSignal.timeout(this.timeoutMs);
+            const signal = this.signal ? AbortSignal.any([this.signal, timeout]) : timeout;
+            const started = Date.now();
+            let response: Response;
+            try {
+                response = await fetch(this.resolve(target.toString()), { headers, redirect: 'manual', signal });
+            } catch (err) {
+                if (this.signal?.aborted) {
+                    throw new AbortedError();
+                }
+                throw err;
+            }
+            const location = response.headers.get('location');
+            if (response.status >= 300 && response.status < 400 && location && hop < MAX_REDIRECTS) {
+                await response.body?.cancel();
+                const next = new URL(location, target);
+                if (next.protocol !== 'https:') {
+                    return { status: response.status, body: Buffer.alloc(0) };
+                }
+                if (next.origin !== target.origin) {
+                    headers = Object.fromEntries(
+                        Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'authorization'),
+                    );
+                }
+                target = next;
+                continue;
+            }
+            const declared = Number(response.headers.get('content-length'));
+            if (declared > maxBytes) {
+                await response.body?.cancel();
+                throw new Error(`Blink image is larger than ${maxBytes} bytes`);
+            }
+            const body = Buffer.from(await response.arrayBuffer());
+            if (body.length > maxBytes) {
+                throw new Error(`Blink image is larger than ${maxBytes} bytes`);
+            }
+            this.trace?.(`GET <image> -> ${response.status} in ${Date.now() - started} ms, ${body.length} bytes`);
+            return { status: response.status, body };
+        }
+    }
+
+    /**
+     * Sends a request without following redirects.
+     *
+     * @param url - Absolute https URL of the Blink cloud
+     * @param request - Method, headers, body and cookie jar
+     */
+    public async request(url: string, request: HttpRequest = {}): Promise<HttpResponse> {
+        this.guard();
         const headers: Record<string, string> = { 'Accept-Language': 'en-US,en;q=0.9', ...request.headers };
         let body: string | undefined;
         if (request.form) {

@@ -474,6 +474,119 @@ tests.integration(path.join(__dirname, '..'), {
             });
         });
 
+        suite('Snapshots', getHarness => {
+            let harness;
+            let cloud;
+            const CAM = 'cameras.3001';
+            const FILE = 'cameras/3001.jpg';
+
+            const press = id => harness.states.setState(`${NS}.${id}.snapshot`, { val: true, ack: false });
+            const waitForResult = (id, result, timeoutMs = 15_000) =>
+                waitFor(
+                    async () =>
+                        (await stateVal(harness, `${id}.snapshotPending`)) === false &&
+                        (await stateVal(harness, `${id}.snapshotResult`)) === result,
+                    `snapshot result ${result}`,
+                    timeoutMs,
+                );
+            const readImage = async () => Buffer.from((await harness.objects.readFile(NS, FILE)).file);
+
+            before(async function () {
+                this.timeout(60_000);
+                harness = getHarness();
+                cloud = await startFakeBlink();
+                await harness.changeAdapterConfig('blink', {
+                    native: { email: cloud.email, password: cloud.password, pin: '', pollInterval: 3600 },
+                });
+                await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
+                await waitFor(async () => (await stateVal(harness, `${CAM}.image`))?.length > 0, 'first image');
+            });
+
+            after(async () => {
+                await cloud?.close();
+            });
+
+            it('fetches the last images without waking a camera', async function () {
+                this.timeout(20_000);
+                await waitFor(async () => (await stateVal(harness, 'cameras.3002.image'))?.length > 0, 'image of the Mini');
+                expect(await stateVal(harness, `${CAM}.image`)).to.match(/^\/blink\.0\/cameras\/3001\.jpg\?t=\d+$/);
+                expect(await stateVal(harness, `${CAM}.imageTime`)).to.equal(1_700_000_000_000);
+                expect(await stateVal(harness, 'cameras.3002.imageTime'), 'no time in the address').to.equal(0);
+                expect((await readImage()).toString('latin1')).to.include('fake-3001-1');
+                expect(cloud.stats.snapshot).to.equal(0);
+            });
+
+            it('takes a new image: pending at once, new address and file', async function () {
+                this.timeout(20_000);
+                const before = await stateVal(harness, `${CAM}.image`);
+                cloud.config.snapshotDelayMs = 1_500;
+                await press(CAM);
+                await waitFor(async () => (await stateVal(harness, `${CAM}.snapshotPending`)) === true, 'pending', 1_000);
+
+                await waitForResult(CAM, 'confirmed');
+                expect(await stateVal(harness, `${CAM}.image`)).to.not.equal(before);
+                expect((await readImage()).toString('latin1')).to.include('fake-3001-2');
+                expect(await stateVal(harness, `${CAM}.imageTime`)).to.be.greaterThan(Date.now() - 60_000);
+                expect(cloud.stats.snapshot).to.equal(1);
+                cloud.config.snapshotDelayMs = 0;
+            });
+
+            it('confirms the button with ack: true', async () => {
+                expect((await harness.states.getState(`${NS}.${CAM}.snapshot`)).ack).to.equal(true);
+            });
+
+            it('spares the battery right after a new image', async function () {
+                this.timeout(10_000);
+                await press(CAM);
+                await waitForResult(CAM, 'throttled', 5_000);
+                expect(cloud.stats.snapshot).to.equal(1);
+            });
+
+            it('keeps the old image when only the address changes', async function () {
+                this.timeout(40_000);
+                cloud.config.snapshotSameContent = true;
+                const id = 'cameras.3003';
+                await waitFor(async () => (await stateVal(harness, `${id}.image`))?.length > 0, 'first image');
+                const time = await stateVal(harness, `${id}.imageTime`);
+                await press(id);
+                await waitForResult(id, 'unconfirmed', 35_000);
+                expect(await stateVal(harness, `${id}.imageTime`)).to.equal(time);
+                cloud.config.snapshotSameContent = false;
+            });
+
+            it('does not wake an offline camera', async function () {
+                this.timeout(15_000);
+                const device = cloud.config.homescreen.owls[0];
+                device.status = 'offline';
+                const before = cloud.stats.snapshot;
+                await press('cameras.3002');
+                await waitForResult('cameras.3002', 'offline');
+                expect(cloud.stats.snapshot).to.equal(before);
+                device.status = 'online';
+            });
+
+            it('reports a failed command', async function () {
+                this.timeout(15_000);
+                cloud.config.snapshotCommandFails = true;
+                await press('cameras.3002');
+                await waitForResult('cameras.3002', 'rejected');
+                cloud.config.snapshotCommandFails = false;
+            });
+
+            it('asks a Mini over its own path', async function () {
+                this.timeout(15_000);
+                const paths = () =>
+                    cloud.requests.filter(item => item.method === 'POST' && /thumbnail$/.test(item.path)).map(item => item.path);
+                await press('cameras.3002');
+                await waitForResult('cameras.3002', 'confirmed');
+                expect(paths().pop()).to.match(/\/networks\/1001\/owls\/3002\/thumbnail$/);
+            });
+
+            it('keeps the address at Blink, password, e-mail address and tokens out of states and log', async () => {
+                await expectNoSecrets(harness, [cloud.email, cloud.password, '/media/', ...cloud.issuedTokens()]);
+            });
+        });
+
         suite('Wrong password', getHarness => {
             let harness;
             let cloud;

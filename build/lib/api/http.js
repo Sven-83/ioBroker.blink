@@ -119,6 +119,69 @@ class HttpClient {
     const parsed = new URL(url);
     return `${this.testOrigin}${parsed.pathname}${parsed.search}`;
   }
+  guard() {
+    var _a;
+    if ((_a = this.signal) == null ? void 0 : _a.aborted) {
+      throw new import_errors.AbortedError();
+    }
+    if (!this.testOrigin && process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+      throw new Error("TLS certificate checks are switched off in this process, nothing is sent to Blink");
+    }
+  }
+  /**
+   * Downloads a binary file. Redirects are followed over https only, and the Authorization header
+   * never leaves the origin it was meant for. Addresses of images stay out of the log.
+   *
+   * @param url - Absolute https URL
+   * @param requestHeaders - Request headers
+   * @param maxBytes - Larger answers are refused
+   */
+  async download(url, requestHeaders, maxBytes) {
+    var _a, _b, _c, _d;
+    let target = new URL(url);
+    let headers = { ...requestHeaders };
+    for (let hop = 0; ; hop++) {
+      this.guard();
+      const timeout = AbortSignal.timeout(this.timeoutMs);
+      const signal = this.signal ? AbortSignal.any([this.signal, timeout]) : timeout;
+      const started = Date.now();
+      let response;
+      try {
+        response = await fetch(this.resolve(target.toString()), { headers, redirect: "manual", signal });
+      } catch (err) {
+        if ((_a = this.signal) == null ? void 0 : _a.aborted) {
+          throw new import_errors.AbortedError();
+        }
+        throw err;
+      }
+      const location = response.headers.get("location");
+      if (response.status >= 300 && response.status < 400 && location && hop < import_constants.MAX_REDIRECTS) {
+        await ((_b = response.body) == null ? void 0 : _b.cancel());
+        const next = new URL(location, target);
+        if (next.protocol !== "https:") {
+          return { status: response.status, body: Buffer.alloc(0) };
+        }
+        if (next.origin !== target.origin) {
+          headers = Object.fromEntries(
+            Object.entries(headers).filter(([name]) => name.toLowerCase() !== "authorization")
+          );
+        }
+        target = next;
+        continue;
+      }
+      const declared = Number(response.headers.get("content-length"));
+      if (declared > maxBytes) {
+        await ((_c = response.body) == null ? void 0 : _c.cancel());
+        throw new Error(`Blink image is larger than ${maxBytes} bytes`);
+      }
+      const body = Buffer.from(await response.arrayBuffer());
+      if (body.length > maxBytes) {
+        throw new Error(`Blink image is larger than ${maxBytes} bytes`);
+      }
+      (_d = this.trace) == null ? void 0 : _d.call(this, `GET <image> -> ${response.status} in ${Date.now() - started} ms, ${body.length} bytes`);
+      return { status: response.status, body };
+    }
+  }
   /**
    * Sends a request without following redirects.
    *
@@ -126,13 +189,8 @@ class HttpClient {
    * @param request - Method, headers, body and cookie jar
    */
   async request(url, request = {}) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
-    if ((_a = this.signal) == null ? void 0 : _a.aborted) {
-      throw new import_errors.AbortedError();
-    }
-    if (!this.testOrigin && process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
-      throw new Error("TLS certificate checks are switched off in this process, nothing is sent to Blink");
-    }
+    var _a, _b, _c, _d, _e, _f, _g;
+    this.guard();
     const headers = { "Accept-Language": "en-US,en;q=0.9", ...request.headers };
     let body;
     if (request.form) {
@@ -142,7 +200,7 @@ class HttpClient {
       body = JSON.stringify(request.json);
       headers["Content-Type"] = "application/json";
     }
-    const cookie = (_b = request.cookies) == null ? void 0 : _b.header();
+    const cookie = (_a = request.cookies) == null ? void 0 : _a.header();
     if (cookie) {
       headers.Cookie = cookie;
     }
@@ -152,26 +210,26 @@ class HttpClient {
     let response;
     try {
       response = await fetch(this.resolve(url), {
-        method: (_c = request.method) != null ? _c : "GET",
+        method: (_b = request.method) != null ? _b : "GET",
         headers,
         body,
         redirect: "manual",
         signal
       });
     } catch (err) {
-      if ((_d = this.signal) == null ? void 0 : _d.aborted) {
+      if ((_c = this.signal) == null ? void 0 : _c.aborted) {
         throw new import_errors.AbortedError();
       }
       throw err;
     }
-    (_e = request.cookies) == null ? void 0 : _e.update(response.headers);
+    (_d = request.cookies) == null ? void 0 : _d.update(response.headers);
     const text = await response.text();
-    (_g = this.trace) == null ? void 0 : _g.call(this, describeResponse((_f = request.method) != null ? _f : "GET", url, response.status, Date.now() - started, text));
+    (_f = this.trace) == null ? void 0 : _f.call(this, describeResponse((_e = request.method) != null ? _e : "GET", url, response.status, Date.now() - started, text));
     return {
       status: response.status,
       headers: response.headers,
       body: text,
-      location: (_h = response.headers.get("location")) != null ? _h : void 0
+      location: (_g = response.headers.get("location")) != null ? _g : void 0
     };
   }
 }
