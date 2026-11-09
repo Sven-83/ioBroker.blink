@@ -33,7 +33,7 @@ var import_mjpeg = require("../util/mjpeg");
 var import_live_server = require("./live-server");
 const LIVE_IDLE_MS = 2e4;
 const LIVE_FIRST_FRAME_MS = 3e4;
-const LIVE_FPS = 5;
+const LIVE_FPS = 10;
 const LIVE_WIDTH = 1280;
 function ffmpegArgs(maxSeconds) {
   return [
@@ -44,6 +44,11 @@ function ffmpegArgs(maxSeconds) {
     "nobuffer",
     "-flags",
     "low_delay",
+    // with the defaults ffmpeg collects about five seconds of video first, and that delay then stays
+    "-probesize",
+    "256k",
+    "-analyzeduration",
+    "500000",
     "-f",
     "mpegts",
     "-i",
@@ -159,7 +164,9 @@ class LiveManager {
     const start = await this.host.start(device, networkId);
     const immiServer = (0, import_immi.parseImmiServer)(start.server);
     if (!immiServer || !start.token) {
-      this.host.warn(`Camera ${device.id}: Blink offers no live image for this camera`);
+      this.host.warn(
+        `Camera ${device.id}: Blink offers no live image for this camera (${(0, import_immi.describeServer)(start.server)}, token ${start.token ? "given" : "missing"})`
+      );
       await this.server.stop();
       if (start.commandId !== void 0) {
         await this.tellBlink(networkId, start.commandId);
@@ -172,6 +179,8 @@ class LiveManager {
       cameraId: device.id,
       networkId,
       commandId: start.commandId,
+      streamHost: immiServer.host,
+      streamPort: immiServer.port,
       port,
       token,
       expiresAt: now + maxMs,
@@ -241,8 +250,9 @@ class LiveManager {
     }
     if ((0, import_immi.isCertificateError)(err)) {
       this.host.warn(
-        `Camera ${session.cameraId}: the certificate of the Blink stream server was not accepted, the stream token was not sent`
+        `Camera ${session.cameraId}: the certificate of the Blink stream server was not accepted, the stream token was not sent (${(0, import_errors.describeError)(err)})`
       );
+      this.host.describeCertificate(session.streamHost, session.streamPort).then((text) => this.host.warn(`Camera ${session.cameraId}: certificate of the stream server: ${text}`)).catch((failure) => this.host.debug(`Certificate not readable: ${(0, import_errors.describeError)(failure)}`));
       this.endSession(session, "certificate");
       return;
     }

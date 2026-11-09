@@ -8,7 +8,8 @@
 
 import * as utils from '@iobroker/adapter-core';
 import { spawn } from 'node:child_process';
-import { connect as netConnect } from 'node:net';
+import { createHash } from 'node:crypto';
+import { connect as netConnect, isIP } from 'node:net';
 import { connect as tlsConnect } from 'node:tls';
 import {
     AbortedError,
@@ -20,7 +21,8 @@ import {
 } from './lib/api/errors';
 import { HttpClient } from './lib/api/http';
 import type { Homescreen } from './lib/api/homescreen';
-import type { ImmiSocket } from './lib/api/immi';
+import { pinnedCertificateError, type ImmiSocket } from './lib/api/immi';
+import { STREAM_CERT_PEM } from './lib/api/stream-certificate';
 import { OAuthFlow, newHardwareId } from './lib/api/oauth';
 import { RestClient } from './lib/api/rest';
 import type { Session, TokenSet } from './lib/api/types';
@@ -239,6 +241,7 @@ class Blink extends utils.Adapter {
                         this.authorized(session => this.rest!.stopLive(session, networkId, commandId)),
                     ),
                 connect: (host, port, ready) => this.connectStream(origin, host, port, ready),
+                describeCertificate: (host, port) => this.describeCertificate(origin, host, port),
                 setTimer: (run, ms) => this.setTimeout(run, ms),
                 clearTimer: timer => this.clearTimeout(timer as ioBroker.Timeout),
                 listen: () => ({ host: liveBindAddress(this.config.liveBind), port: livePort(this.config.livePort) }),
@@ -433,7 +436,8 @@ class Blink extends utils.Adapter {
     }
 
     /**
-     * Connection to a stream server. The certificate is checked: the stream token is only sent if it is accepted.
+     * Connection to a stream server. Only the one known certificate is trusted, see stream-certificate.ts: the stream
+     * token is only sent if the server has it.
      *
      * @param origin - Local fake cloud of the integration test
      * @param host - Host of the stream server
@@ -447,7 +451,55 @@ class Blink extends utils.Adapter {
         if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
             throw new Error('TLS certificate checks are switched off in this process, nothing is sent to Blink');
         }
-        return tlsConnect({ host, port, servername: host, rejectUnauthorized: true }, ready);
+        return tlsConnect(
+            {
+                host,
+                port,
+                ...(isIP(host) ? {} : { servername: host }),
+                ca: STREAM_CERT_PEM,
+                rejectUnauthorized: true,
+                checkServerIdentity: (_host, certificate) => pinnedCertificateError(certificate),
+            },
+            ready,
+        );
+    }
+
+    /**
+     * Reads who issued the certificate of a stream server, so that a refused certificate can be judged.
+     * The connection is not verified, which is why nothing is ever sent over it: no token, no data.
+     *
+     * @param origin - Local fake cloud of the integration test
+     * @param host - Host of the stream server
+     * @param port - TCP port of the stream server
+     */
+    private describeCertificate(origin: string | undefined, host: string, port: number): Promise<string> {
+        if (origin) {
+            return Promise.resolve('test mode');
+        }
+        return new Promise((resolve, reject) => {
+            const socket = tlsConnect(
+                { host, port, rejectUnauthorized: false, ...(isIP(host) ? {} : { servername: host }) },
+                () => {
+                    const certificate = socket.getPeerCertificate();
+                    const names = (certificate.subjectaltname ?? '-').slice(0, 200);
+                    // what is needed to judge and to renew a pinned certificate. A certificate is public
+                    this.log.debug(`Stream server certificate: ${certificate.raw?.toString('base64') ?? '-'}`);
+                    resolve(
+                        `issuer ${String(certificate.issuer?.CN ?? certificate.issuer?.O ?? '-')}, ` +
+                            `subject ${String(certificate.subject?.CN ?? '-')}, names ${names}, ` +
+                            `valid until ${certificate.valid_to ?? '-'}, check ${String(socket.authorizationError ?? 'ok')}, ` +
+                            `fingerprint ${certificate.fingerprint256 ?? '-'}, ` +
+                            `server ${createHash('sha256').update(host).digest('hex').slice(0, 8)}`,
+                    );
+                    socket.destroy();
+                },
+            );
+            socket.setTimeout(5_000, () => {
+                socket.destroy();
+                reject(new Error('timeout'));
+            });
+            socket.on('error', reject);
+        });
     }
 
     /**

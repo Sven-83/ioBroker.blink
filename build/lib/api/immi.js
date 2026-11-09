@@ -22,10 +22,14 @@ __export(immi_exports, {
   ImmiClient: () => ImmiClient,
   buildAuthPacket: () => buildAuthPacket,
   buildMessage: () => buildMessage,
+  describeServer: () => describeServer,
   isCertificateError: () => isCertificateError,
-  parseImmiServer: () => parseImmiServer
+  parseImmiServer: () => parseImmiServer,
+  pinnedCertificateError: () => pinnedCertificateError
 });
 module.exports = __toCommonJS(immi_exports);
+var import_node_net = require("node:net");
+var import_stream_certificate = require("./stream-certificate");
 const MAX_PAYLOAD = 10 * 1024 * 1024;
 const IMMI_KEEPALIVE_MS = 1e4;
 const HEADER_BYTES = 9;
@@ -37,6 +41,23 @@ const TYPE_KEEPALIVE = 10;
 const TYPE_ROUNDTRIP = 16;
 const TYPE_ROUNDTRIP_ACK = 17;
 const BLINK_HOST = /(^|\.)immedia-semi\.com$/;
+function isPublicIpv4(host) {
+  if ((0, import_node_net.isIP)(host) !== 4) {
+    return false;
+  }
+  const [first, second] = host.split(".").map(Number);
+  const isPrivate = first === 0 || first === 10 || first === 127 || first >= 224 || first === 100 && second >= 64 && second <= 127 || first === 169 && second === 254 || first === 172 && second >= 16 && second <= 31 || first === 192 && second === 168;
+  return !isPrivate;
+}
+function pinnedCertificateError(certificate, expected = import_stream_certificate.STREAM_CERT_FINGERPRINT) {
+  const plain = (value) => value.replaceAll(":", "").toUpperCase();
+  if (certificate.fingerprint256 && plain(certificate.fingerprint256) === plain(expected)) {
+    return void 0;
+  }
+  return Object.assign(new Error("The stream server does not have the known certificate"), {
+    code: "CERT_PIN_MISMATCH"
+  });
+}
 function parseImmiServer(uri) {
   if (typeof uri !== "string" || !/^immis:\/\//i.test(uri)) {
     return void 0;
@@ -49,10 +70,26 @@ function parseImmiServer(uri) {
   }
   const transaction = decodeURIComponent(url.pathname.replace(/^\/+/, "")).split("__")[0];
   const clientId = Number(url.searchParams.get("client_id"));
-  if (!BLINK_HOST.test(url.hostname) || !transaction || !Number.isInteger(clientId) || clientId <= 0) {
+  const allowed = BLINK_HOST.test(url.hostname) || isPublicIpv4(url.hostname);
+  if (!allowed || !transaction || !Number.isInteger(clientId) || clientId <= 0) {
     return void 0;
   }
   return { host: url.hostname, port: Number(url.port) || 443, transaction, clientId };
+}
+function describeServer(uri) {
+  var _a, _b, _c;
+  if (typeof uri !== "string") {
+    return `no text (${typeof uri})`;
+  }
+  const scheme = (_c = (_b = (_a = uri.match(/^([a-z][a-z0-9+.-]*):\/\//i)) == null ? void 0 : _a[1]) == null ? void 0 : _b.toLowerCase()) != null ? _c : "none";
+  try {
+    const url = new URL(uri);
+    const domain = url.hostname.split(".").slice(-2).join(".");
+    const query = [...url.searchParams.keys()].filter((key) => /^[a-z_]{1,20}$/i.test(key)).join(",") || "-";
+    return `scheme ${scheme}, domain ${domain}, port ${url.port || "-"}, separator ${url.pathname.includes("__")}, query ${query}`;
+  } catch {
+    return `scheme ${scheme}, not readable as an address`;
+  }
 }
 function u32(value) {
   const buffer = Buffer.alloc(4);
@@ -174,7 +211,9 @@ function isCertificateError(err) {
   ImmiClient,
   buildAuthPacket,
   buildMessage,
+  describeServer,
   isCertificateError,
-  parseImmiServer
+  parseImmiServer,
+  pinnedCertificateError
 });
 //# sourceMappingURL=immi.js.map

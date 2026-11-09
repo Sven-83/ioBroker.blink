@@ -9,7 +9,7 @@
 import { randomBytes } from 'node:crypto';
 import { AbortedError, describeError } from '../api/errors';
 import type { BlinkDevice } from '../api/homescreen';
-import { ImmiClient, isCertificateError, parseImmiServer, type ImmiSocket } from '../api/immi';
+import { ImmiClient, describeServer, isCertificateError, parseImmiServer, type ImmiSocket } from '../api/immi';
 import { FrameSplitter } from '../util/mjpeg';
 import { LiveServer, type ListenOptions } from './live-server';
 import type { ObjectTree } from './tree';
@@ -33,7 +33,7 @@ export const LIVE_IDLE_MS = 20_000;
 /** Session ends if no image has come after this long */
 export const LIVE_FIRST_FRAME_MS = 30_000;
 /** Images per second */
-export const LIVE_FPS = 5;
+export const LIVE_FPS = 10;
 /** Width of the images */
 export const LIVE_WIDTH = 1280;
 
@@ -85,6 +85,8 @@ export interface LiveHost {
     stop(networkId: number, commandId: number): Promise<void>;
     /** Opens a verified connection to a stream server */
     connect(host: string, port: number, ready: () => void): ImmiSocket;
+    /** Who issued the certificate of a stream server, for the log. Sends nothing to the server */
+    describeCertificate(host: string, port: number): Promise<string>;
     /** Starts a timer */
     setTimer(run: () => void, ms: number): unknown;
     /** Stops a timer */
@@ -115,6 +117,8 @@ interface Session {
     cameraId: number;
     networkId: number;
     commandId: number | undefined;
+    streamHost: string;
+    streamPort: number;
     port: number;
     token: string;
     expiresAt: number;
@@ -141,6 +145,11 @@ export function ffmpegArgs(maxSeconds: number): string[] {
         'nobuffer',
         '-flags',
         'low_delay',
+        // with the defaults ffmpeg collects about five seconds of video first, and that delay then stays
+        '-probesize',
+        '256k',
+        '-analyzeduration',
+        '500000',
         '-f',
         'mpegts',
         '-i',
@@ -269,7 +278,10 @@ export class LiveManager {
         const start = await this.host.start(device, networkId);
         const immiServer = parseImmiServer(start.server);
         if (!immiServer || !start.token) {
-            this.host.warn(`Camera ${device.id}: Blink offers no live image for this camera`);
+            this.host.warn(
+                `Camera ${device.id}: Blink offers no live image for this camera ` +
+                    `(${describeServer(start.server)}, token ${start.token ? 'given' : 'missing'})`,
+            );
             await this.server.stop();
             if (start.commandId !== undefined) {
                 await this.tellBlink(networkId, start.commandId);
@@ -283,6 +295,8 @@ export class LiveManager {
             cameraId: device.id,
             networkId,
             commandId: start.commandId,
+            streamHost: immiServer.host,
+            streamPort: immiServer.port,
             port,
             token,
             expiresAt: now + maxMs,
@@ -359,8 +373,12 @@ export class LiveManager {
         if (isCertificateError(err)) {
             this.host.warn(
                 `Camera ${session.cameraId}: the certificate of the Blink stream server was not accepted, ` +
-                    'the stream token was not sent',
+                    `the stream token was not sent (${describeError(err)})`,
             );
+            this.host
+                .describeCertificate(session.streamHost, session.streamPort)
+                .then(text => this.host.warn(`Camera ${session.cameraId}: certificate of the stream server: ${text}`))
+                .catch((failure: unknown) => this.host.debug(`Certificate not readable: ${describeError(failure)}`));
             this.endSession(session, 'certificate');
             return;
         }

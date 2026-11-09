@@ -23,10 +23,13 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var utils = __toESM(require("@iobroker/adapter-core"));
 var import_node_child_process = require("node:child_process");
+var import_node_crypto = require("node:crypto");
 var import_node_net = require("node:net");
 var import_node_tls = require("node:tls");
 var import_errors = require("./lib/api/errors");
 var import_http = require("./lib/api/http");
+var import_immi = require("./lib/api/immi");
+var import_stream_certificate = require("./lib/api/stream-certificate");
 var import_oauth = require("./lib/api/oauth");
 var import_rest = require("./lib/api/rest");
 var import_session_store = require("./lib/model/session-store");
@@ -205,6 +208,7 @@ class Blink extends utils.Adapter {
           () => this.authorized((session) => this.rest.stopLive(session, networkId, commandId))
         ),
         connect: (host, port, ready) => this.connectStream(origin, host, port, ready),
+        describeCertificate: (host, port) => this.describeCertificate(origin, host, port),
         setTimer: (run, ms) => this.setTimeout(run, ms),
         clearTimer: (timer) => this.clearTimeout(timer),
         listen: () => ({ host: (0, import_config.liveBindAddress)(this.config.liveBind), port: (0, import_config.livePort)(this.config.livePort) }),
@@ -386,7 +390,8 @@ class Blink extends utils.Adapter {
     });
   }
   /**
-   * Connection to a stream server. The certificate is checked: the stream token is only sent if it is accepted.
+   * Connection to a stream server. Only the one known certificate is trusted, see stream-certificate.ts: the stream
+   * token is only sent if the server has it.
    *
    * @param origin - Local fake cloud of the integration test
    * @param host - Host of the stream server
@@ -400,7 +405,50 @@ class Blink extends utils.Adapter {
     if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
       throw new Error("TLS certificate checks are switched off in this process, nothing is sent to Blink");
     }
-    return (0, import_node_tls.connect)({ host, port, servername: host, rejectUnauthorized: true }, ready);
+    return (0, import_node_tls.connect)(
+      {
+        host,
+        port,
+        ...(0, import_node_net.isIP)(host) ? {} : { servername: host },
+        ca: import_stream_certificate.STREAM_CERT_PEM,
+        rejectUnauthorized: true,
+        checkServerIdentity: (_host, certificate) => (0, import_immi.pinnedCertificateError)(certificate)
+      },
+      ready
+    );
+  }
+  /**
+   * Reads who issued the certificate of a stream server, so that a refused certificate can be judged.
+   * The connection is not verified, which is why nothing is ever sent over it: no token, no data.
+   *
+   * @param origin - Local fake cloud of the integration test
+   * @param host - Host of the stream server
+   * @param port - TCP port of the stream server
+   */
+  describeCertificate(origin, host, port) {
+    if (origin) {
+      return Promise.resolve("test mode");
+    }
+    return new Promise((resolve, reject) => {
+      const socket = (0, import_node_tls.connect)(
+        { host, port, rejectUnauthorized: false, ...(0, import_node_net.isIP)(host) ? {} : { servername: host } },
+        () => {
+          var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+          const certificate = socket.getPeerCertificate();
+          const names = ((_a = certificate.subjectaltname) != null ? _a : "-").slice(0, 200);
+          this.log.debug(`Stream server certificate: ${(_c = (_b = certificate.raw) == null ? void 0 : _b.toString("base64")) != null ? _c : "-"}`);
+          resolve(
+            `issuer ${String((_g = (_f = (_d = certificate.issuer) == null ? void 0 : _d.CN) != null ? _f : (_e = certificate.issuer) == null ? void 0 : _e.O) != null ? _g : "-")}, subject ${String((_i = (_h = certificate.subject) == null ? void 0 : _h.CN) != null ? _i : "-")}, names ${names}, valid until ${(_j = certificate.valid_to) != null ? _j : "-"}, check ${String((_k = socket.authorizationError) != null ? _k : "ok")}, fingerprint ${(_l = certificate.fingerprint256) != null ? _l : "-"}, server ${(0, import_node_crypto.createHash)("sha256").update(host).digest("hex").slice(0, 8)}`
+          );
+          socket.destroy();
+        }
+      );
+      socket.setTimeout(5e3, () => {
+        socket.destroy();
+        reject(new Error("timeout"));
+      });
+      socket.on("error", reject);
+    });
   }
   /**
    * Images are extras: a problem with them must not look like a lost connection.

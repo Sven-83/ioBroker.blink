@@ -1,14 +1,18 @@
 import { expect } from 'chai';
+import { X509Certificate } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
     IMMI_KEEPALIVE_MS,
     ImmiClient,
     buildAuthPacket,
     buildMessage,
+    describeServer,
     isCertificateError,
     parseImmiServer,
+    pinnedCertificateError,
     type ImmiServer,
 } from './immi';
+import { STREAM_CERT_FINGERPRINT, STREAM_CERT_PEM } from './stream-certificate';
 
 const ADDRESS = 'immis://stream-test.immedia-semi.com:443/TRANS_ACTION__IMDS_SERIAL?client_id=250';
 const SERVER: ImmiServer = {
@@ -70,6 +74,16 @@ describe('api/immi parseImmiServer', () => {
         expect(parseImmiServer(ADDRESS)).to.deep.equal(SERVER);
     });
 
+    it('accepts the bare public IP address Blink really sends', () => {
+        expect(parseImmiServer('immis://203.0.113.5:443/T__X?client_id=1')?.host).to.equal('203.0.113.5');
+    });
+
+    it('refuses addresses that lead to the own computer or network', () => {
+        for (const host of ['127.0.0.1', '0.0.0.0', '169.254.1.1', '[::1]']) {
+            expect(parseImmiServer(`immis://${host}:443/T__X?client_id=1`), host).to.equal(undefined);
+        }
+    });
+
     it('takes 443 as the default port', () => {
         expect(parseImmiServer('immis://a.immedia-semi.com/T__X?client_id=1')?.port).to.equal(443);
     });
@@ -98,6 +112,44 @@ describe('api/immi parseImmiServer', () => {
         ]) {
             expect(parseImmiServer(value), String(value)).to.equal(undefined);
         }
+    });
+});
+
+describe('api/immi pinned certificate', () => {
+    it('stores a certificate that really has the stored fingerprint', () => {
+        const certificate = new X509Certificate(STREAM_CERT_PEM);
+        expect(certificate.fingerprint256.replaceAll(':', '')).to.equal(STREAM_CERT_FINGERPRINT);
+        expect(certificate.subject).to.contain('immedia-semi.com');
+    });
+
+    it('accepts exactly this certificate, in the form Node.js reports it', () => {
+        const { fingerprint256 } = new X509Certificate(STREAM_CERT_PEM);
+        expect(fingerprint256).to.contain(':');
+        expect(pinnedCertificateError({ fingerprint256 })).to.equal(undefined);
+        expect(pinnedCertificateError({ fingerprint256: STREAM_CERT_FINGERPRINT.toLowerCase() })).to.equal(undefined);
+    });
+
+    it('refuses any other certificate, with an error recognised as a certificate problem', () => {
+        for (const fingerprint256 of ['AA:BB', '', undefined]) {
+            const error = pinnedCertificateError({ fingerprint256 });
+            expect(error, String(fingerprint256)).to.be.instanceOf(Error);
+            expect(isCertificateError(error)).to.equal(true);
+        }
+    });
+});
+
+describe('api/immi describeServer', () => {
+    it('shows the form of an address, not its data', () => {
+        const text = describeServer(
+            'rtsps://lv-secret-host.immedia-semi.com:443/SECRETTX__IMDS_SERIAL?client_id=SECRET&x=1',
+        );
+        expect(text).to.equal('scheme rtsps, domain immedia-semi.com, port 443, separator true, query client_id,x');
+        expect(text).to.not.match(/SECRET|secret|SERIAL/);
+    });
+
+    it('copes with values that are no address', () => {
+        expect(describeServer(undefined)).to.equal('no text (undefined)');
+        expect(describeServer('SECRET')).to.equal('scheme none, not readable as an address');
     });
 });
 

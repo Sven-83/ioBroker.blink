@@ -150,6 +150,7 @@ function setup(script: Script = {}): {
             sockets.push(socket);
             return socket;
         },
+        describeCertificate: () => Promise.resolve('issuer TEST'),
         setTimer: (run, ms) => {
             const timer: Timer = { run, ms, active: true };
             timers.push(timer);
@@ -478,6 +479,7 @@ describe('model/live-manager', () => {
             await expectEnded(context, 'certificate');
             expect(context.sockets[0].written).to.deep.equal([]);
             expect(context.messages.join()).to.contain('certificate');
+            expect(context.messages.join(), 'says who issued it').to.contain('issuer TEST');
         });
 
         it('closes the image for its viewers', async () => {

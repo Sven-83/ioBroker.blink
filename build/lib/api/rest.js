@@ -186,11 +186,12 @@ class RestClient {
    * @param commandId - Command ID of the session
    */
   async stopLive(session, networkId, commandId) {
-    const response = await this.http.request(
-      `${session.restOrigin}/network/${networkId}/command/${commandId}/done/`,
-      { method: "POST", headers: headers(session), json: {} }
+    const account = `/accounts/${session.accountId}/networks/${networkId}/commands/${commandId}/done`;
+    await this.command(
+      session,
+      [`/api/v1${account}`, account, `/network/${networkId}/command/${commandId}/done/`],
+      "Ending the Blink live image"
     );
-    check(response, "Ending the Blink live image");
   }
   /**
    * Downloads the image a "thumbnail" field points to. This does not wake the camera: Blink has the image.

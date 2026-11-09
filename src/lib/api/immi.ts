@@ -2,9 +2,12 @@
  * Client of the IMMI protocol of the Blink stream servers (immis://). Blink has no documentation for it:
  * the packets are known from community clients (Pischleuder1/ioBroker.blink, MIT, lib/immi-live-hls.js).
  *
- * Differences to that source: the certificate of the server is checked by the caller's connect function, and
- * the stream token is only sent after a verified connection.
+ * Differences to that source: that source does not check the certificate of the server. Here only the one known
+ * certificate is accepted (stream-certificate.ts), and the stream token is only sent after that check.
  */
+
+import { isIP } from 'node:net';
+import { STREAM_CERT_FINGERPRINT } from './stream-certificate';
 
 /** Answers longer than this are not IMMI: the stream is out of step */
 const MAX_PAYLOAD = 10 * 1024 * 1024;
@@ -51,6 +54,51 @@ export interface ImmiSocket {
 }
 
 /**
+ * Blink names its stream servers by a bare IP address. That is acceptable, as the address comes from an answer of
+ * the Blink cloud over a verified connection; the identity of the server is then checked by its certificate.
+ *
+ * @param host - Host of an address
+ */
+function isPublicIpv4(host: string): boolean {
+    if (isIP(host) !== 4) {
+        return false;
+    }
+    const [first, second] = host.split('.').map(Number);
+    const isPrivate =
+        first === 0 ||
+        first === 10 ||
+        first === 127 ||
+        first >= 224 ||
+        (first === 100 && second >= 64 && second <= 127) ||
+        (first === 169 && second === 254) ||
+        (first === 172 && second >= 16 && second <= 31) ||
+        (first === 192 && second === 168);
+    return !isPrivate;
+}
+
+/**
+ * Replaces the comparison of the host name. A stream server has a bare IP address and a self-signed certificate:
+ * neither says anything about who it is, only the fingerprint of the certificate does.
+ *
+ * @param certificate - Certificate of the server
+ * @param certificate.fingerprint256 - Its SHA-256 fingerprint
+ * @param expected - Fingerprint of the known certificate
+ * @returns An error if this is not the known certificate
+ */
+export function pinnedCertificateError(
+    certificate: { fingerprint256?: string },
+    expected: string = STREAM_CERT_FINGERPRINT,
+): Error | undefined {
+    const plain = (value: string): string => value.replaceAll(':', '').toUpperCase();
+    if (certificate.fingerprint256 && plain(certificate.fingerprint256) === plain(expected)) {
+        return undefined;
+    }
+    return Object.assign(new Error('The stream server does not have the known certificate'), {
+        code: 'CERT_PIN_MISMATCH',
+    });
+}
+
+/**
  * Splits an immis:// address.
  *
  * @param uri - Value of the field "server" of the answer of Blink
@@ -68,10 +116,32 @@ export function parseImmiServer(uri: unknown): ImmiServer | undefined {
     }
     const transaction = decodeURIComponent(url.pathname.replace(/^\/+/, '')).split('__')[0];
     const clientId = Number(url.searchParams.get('client_id'));
-    if (!BLINK_HOST.test(url.hostname) || !transaction || !Number.isInteger(clientId) || clientId <= 0) {
+    const allowed = BLINK_HOST.test(url.hostname) || isPublicIpv4(url.hostname);
+    if (!allowed || !transaction || !Number.isInteger(clientId) || clientId <= 0) {
         return undefined;
     }
     return { host: url.hostname, port: Number(url.port) || 443, transaction, clientId };
+}
+
+/**
+ * What an address looks like, for the log: scheme, domain and which parts it has. The path and the query can
+ * contain data of the stream, so their values stay out.
+ *
+ * @param uri - Value of the field "server" of the answer of Blink
+ */
+export function describeServer(uri: unknown): string {
+    if (typeof uri !== 'string') {
+        return `no text (${typeof uri})`;
+    }
+    const scheme = uri.match(/^([a-z][a-z0-9+.-]*):\/\//i)?.[1]?.toLowerCase() ?? 'none';
+    try {
+        const url = new URL(uri);
+        const domain = url.hostname.split('.').slice(-2).join('.');
+        const query = [...url.searchParams.keys()].filter(key => /^[a-z_]{1,20}$/i.test(key)).join(',') || '-';
+        return `scheme ${scheme}, domain ${domain}, port ${url.port || '-'}, separator ${url.pathname.includes('__')}, query ${query}`;
+    } catch {
+        return `scheme ${scheme}, not readable as an address`;
+    }
 }
 
 function u32(value: number): Buffer {
