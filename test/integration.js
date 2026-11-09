@@ -506,6 +506,12 @@ tests.integration(path.join(__dirname, '..'), {
                 await cloud?.close();
             });
 
+            it('creates the file storage itself, also for an instance that already exists', async () => {
+                const meta = await harness.objects.getObjectAsync(NS);
+                expect(meta.type).to.equal('meta');
+                expect(meta.common.type).to.equal('meta.user');
+            });
+
             it('fetches the last images without waking a camera', async function () {
                 this.timeout(20_000);
                 await waitFor(async () => (await stateVal(harness, 'cameras.3002.image'))?.length > 0, 'image of the Mini');

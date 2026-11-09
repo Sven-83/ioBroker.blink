@@ -100,15 +100,6 @@
     "objects": [],
     "instanceObjects": [
         {
-            "_id": "",
-            "type": "meta",
-            "common": {
-                "name": "Images of the cameras",
-                "type": "meta.user"
-            },
-            "native": {}
-        },
-        {
             "_id": "info",
             "type": "channel",
             "common": {

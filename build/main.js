@@ -85,6 +85,11 @@ class Blink extends utils.Adapter {
     }
     this.email = email;
     this.pollSeconds = (0, import_config.pollIntervalSeconds)(this.config.pollInterval);
+    await this.setForeignObjectNotExistsAsync(this.namespace, {
+      type: "meta",
+      common: { name: "Images of the cameras", type: "meta.user" },
+      native: {}
+    });
     const origin = (0, import_config.testOrigin)(process.env[import_config.TEST_ORIGIN_ENV]);
     if (origin) {
       this.log.warn(`Test mode: all requests go to ${origin}`);

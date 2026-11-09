@@ -110,6 +110,12 @@ class Blink extends utils.Adapter {
         }
         this.email = email;
         this.pollSeconds = pollIntervalSeconds(this.config.pollInterval);
+        // created here, as instanceObjects of io-package.json do not reach an instance that already exists
+        await this.setForeignObjectNotExistsAsync(this.namespace, {
+            type: 'meta',
+            common: { name: 'Images of the cameras', type: 'meta.user' },
+            native: {},
+        });
 
         const origin = testOrigin(process.env[TEST_ORIGIN_ENV]);
         if (origin) {
