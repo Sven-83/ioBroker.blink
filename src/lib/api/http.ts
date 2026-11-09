@@ -78,6 +78,57 @@ export interface HttpClientOptions {
     timeoutMs?: number;
     /** Aborts all requests when the adapter unloads */
     signal?: AbortSignal;
+    /** Receives one line per response, see describeResponse() */
+    trace?: (line: string) => void;
+}
+
+/** Most field names of one response in a trace line */
+const TRACE_MAX_FIELDS = 300;
+/** Field names that look like this are part of the API. Anything else could be data (IDs, addresses) */
+const TRACE_FIELD = /^[A-Za-z_][A-Za-z0-9_-]{0,39}$/;
+/** Top-level fields whose value is shown, only if it is a number or boolean: they say how a command ended */
+const TRACE_VALUES = ['complete', 'status', 'status_code'];
+
+function collectFields(value: unknown, path: string, names: Set<string>): void {
+    if (names.size >= TRACE_MAX_FIELDS) {
+        return;
+    }
+    if (Array.isArray(value)) {
+        for (const entry of value) {
+            collectFields(entry, `${path}[]`, names);
+        }
+    } else if (value !== null && typeof value === 'object') {
+        for (const [key, entry] of Object.entries(value)) {
+            const name = TRACE_FIELD.test(key) ? key : '*';
+            collectFields(entry, path ? `${path}.${name}` : name, names);
+        }
+    } else if (path) {
+        names.add(path);
+    }
+}
+
+/**
+ * Line for the debug log: shows how Blink answers without showing the data of the account. Query, numbers
+ * in the path and all values stay out, except the status values of a command.
+ *
+ * @param method - HTTP method
+ * @param url - Requested URL
+ * @param status - HTTP status
+ * @param ms - Duration
+ * @param body - Response body
+ */
+export function describeResponse(method: string, url: string, status: number, ms: number, body: string): string {
+    const path = new URL(url).pathname.replace(/\/\d+(?=\/|$)/g, '/:id');
+    const parsed = parseJson(body);
+    const names = new Set<string>();
+    collectFields(parsed, '', names);
+    const values = TRACE_VALUES.flatMap(key => {
+        const value = field(parsed, key);
+        return typeof value === 'number' || typeof value === 'boolean' ? [`${key}=${value}`] : [];
+    });
+    return `${method} ${path} -> ${status} in ${ms} ms, fields: ${[...names].join(' ') || '-'}${
+        values.length > 0 ? `, values: ${values.join(' ')}` : ''
+    }`;
 }
 
 /** Thin fetch wrapper used by the OAuth flow and the REST client */
@@ -85,6 +136,7 @@ export class HttpClient {
     private readonly testOrigin: string | undefined;
     private readonly timeoutMs: number;
     private readonly signal: AbortSignal | undefined;
+    private readonly trace: ((line: string) => void) | undefined;
 
     /**
      * @param options - Client options
@@ -93,6 +145,7 @@ export class HttpClient {
         this.testOrigin = options.testOrigin;
         this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
         this.signal = options.signal;
+        this.trace = options.trace;
     }
 
     /**
@@ -118,6 +171,10 @@ export class HttpClient {
         if (this.signal?.aborted) {
             throw new AbortedError();
         }
+        // the requests carry the password and tokens: never send them over a connection that is not verified
+        if (!this.testOrigin && process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+            throw new Error('TLS certificate checks are switched off in this process, nothing is sent to Blink');
+        }
         const headers: Record<string, string> = { 'Accept-Language': 'en-US,en;q=0.9', ...request.headers };
         let body: string | undefined;
         if (request.form) {
@@ -134,6 +191,7 @@ export class HttpClient {
 
         const timeout = AbortSignal.timeout(this.timeoutMs);
         const signal = this.signal ? AbortSignal.any([this.signal, timeout]) : timeout;
+        const started = Date.now();
         let response: Response;
         try {
             response = await fetch(this.resolve(url), {
@@ -151,6 +209,7 @@ export class HttpClient {
         }
         request.cookies?.update(response.headers);
         const text = await response.text();
+        this.trace?.(describeResponse(request.method ?? 'GET', url, response.status, Date.now() - started, text));
         return {
             status: response.status,
             headers: response.headers,

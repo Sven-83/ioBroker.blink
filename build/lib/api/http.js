@@ -20,6 +20,7 @@ var http_exports = {};
 __export(http_exports, {
   CookieJar: () => CookieJar,
   HttpClient: () => HttpClient,
+  describeResponse: () => describeResponse,
   field: () => field,
   parseJson: () => parseJson,
   retryAfterMs: () => retryAfterMs
@@ -60,10 +61,42 @@ class CookieJar {
     return Object.fromEntries(this.cookies);
   }
 }
+const TRACE_MAX_FIELDS = 300;
+const TRACE_FIELD = /^[A-Za-z_][A-Za-z0-9_-]{0,39}$/;
+const TRACE_VALUES = ["complete", "status", "status_code"];
+function collectFields(value, path, names) {
+  if (names.size >= TRACE_MAX_FIELDS) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectFields(entry, `${path}[]`, names);
+    }
+  } else if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      const name = TRACE_FIELD.test(key) ? key : "*";
+      collectFields(entry, path ? `${path}.${name}` : name, names);
+    }
+  } else if (path) {
+    names.add(path);
+  }
+}
+function describeResponse(method, url, status, ms, body) {
+  const path = new URL(url).pathname.replace(/\/\d+(?=\/|$)/g, "/:id");
+  const parsed = parseJson(body);
+  const names = /* @__PURE__ */ new Set();
+  collectFields(parsed, "", names);
+  const values = TRACE_VALUES.flatMap((key) => {
+    const value = field(parsed, key);
+    return typeof value === "number" || typeof value === "boolean" ? [`${key}=${value}`] : [];
+  });
+  return `${method} ${path} -> ${status} in ${ms} ms, fields: ${[...names].join(" ") || "-"}${values.length > 0 ? `, values: ${values.join(" ")}` : ""}`;
+}
 class HttpClient {
   testOrigin;
   timeoutMs;
   signal;
+  trace;
   /**
    * @param options - Client options
    */
@@ -72,6 +105,7 @@ class HttpClient {
     this.testOrigin = options.testOrigin;
     this.timeoutMs = (_a = options.timeoutMs) != null ? _a : import_constants.REQUEST_TIMEOUT_MS;
     this.signal = options.signal;
+    this.trace = options.trace;
   }
   /**
    * URL as it is really requested (with the test origin, if set).
@@ -92,9 +126,12 @@ class HttpClient {
    * @param request - Method, headers, body and cookie jar
    */
   async request(url, request = {}) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     if ((_a = this.signal) == null ? void 0 : _a.aborted) {
       throw new import_errors.AbortedError();
+    }
+    if (!this.testOrigin && process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+      throw new Error("TLS certificate checks are switched off in this process, nothing is sent to Blink");
     }
     const headers = { "Accept-Language": "en-US,en;q=0.9", ...request.headers };
     let body;
@@ -111,6 +148,7 @@ class HttpClient {
     }
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = this.signal ? AbortSignal.any([this.signal, timeout]) : timeout;
+    const started = Date.now();
     let response;
     try {
       response = await fetch(this.resolve(url), {
@@ -128,11 +166,12 @@ class HttpClient {
     }
     (_e = request.cookies) == null ? void 0 : _e.update(response.headers);
     const text = await response.text();
+    (_g = this.trace) == null ? void 0 : _g.call(this, describeResponse((_f = request.method) != null ? _f : "GET", url, response.status, Date.now() - started, text));
     return {
       status: response.status,
       headers: response.headers,
       body: text,
-      location: (_f = response.headers.get("location")) != null ? _f : void 0
+      location: (_h = response.headers.get("location")) != null ? _h : void 0
     };
   }
 }
@@ -159,6 +198,7 @@ function retryAfterMs(response) {
 0 && (module.exports = {
   CookieJar,
   HttpClient,
+  describeResponse,
   field,
   parseJson,
   retryAfterMs

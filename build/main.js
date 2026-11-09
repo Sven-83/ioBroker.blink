@@ -84,7 +84,11 @@ class Blink extends utils.Adapter {
     if (origin) {
       this.log.warn(`Test mode: all requests go to ${origin}`);
     }
-    const http = new import_http.HttpClient({ testOrigin: origin, signal: this.abort.signal });
+    const http = new import_http.HttpClient({
+      testOrigin: origin,
+      signal: this.abort.signal,
+      trace: (line) => this.log.debug(line)
+    });
     this.oauth = new import_oauth.OAuthFlow(http);
     this.rest = new import_rest.RestClient(http);
     this.tree = new import_tree.ObjectTree({
