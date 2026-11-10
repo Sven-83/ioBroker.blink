@@ -18,9 +18,12 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var rest_exports = {};
 __export(rest_exports, {
+  CLIP_MAX_BYTES: () => CLIP_MAX_BYTES,
   IMAGE_MAX_BYTES: () => IMAGE_MAX_BYTES,
   RestClient: () => RestClient,
-  imageUrl: () => imageUrl
+  clipUrl: () => clipUrl,
+  imageUrl: () => imageUrl,
+  isMp4: () => isMp4
 });
 module.exports = __toCommonJS(rest_exports);
 var import_constants = require("./constants");
@@ -29,7 +32,23 @@ var import_homescreen = require("./homescreen");
 var import_http = require("./http");
 const UNKNOWN_PATH = [404, 405, 410];
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+const CLIP_MAX_BYTES = 50 * 1024 * 1024;
 const BLINK_HOST = /(^|\.)immedia-semi\.com$/;
+function clipUrl(media, restOrigin) {
+  let url;
+  try {
+    url = new URL(media, restOrigin);
+  } catch {
+    return void 0;
+  }
+  if (url.protocol !== "https:" || !(url.origin === restOrigin || BLINK_HOST.test(url.hostname))) {
+    return void 0;
+  }
+  return url.toString();
+}
+function isMp4(data) {
+  return data.length > 12 && data.toString("latin1", 4, 8) === "ftyp";
+}
 function imageUrl(thumbnail, restOrigin) {
   let url;
   try {
@@ -263,6 +282,30 @@ class RestClient {
     return response.body;
   }
   /**
+   * Downloads a motion clip from the cloud. This does not wake the camera.
+   *
+   * @param session - Logged-in session
+   * @param media - Value of the "media" field of the media list
+   * @returns The MP4 file
+   */
+  async downloadClip(session, media) {
+    const what = "Downloading a Blink clip";
+    const url = clipUrl(media, session.restOrigin);
+    if (!url) {
+      throw new import_errors.ApiError(`${what} (address outside of Blink)`, 0);
+    }
+    const response = await this.http.download(
+      url,
+      { ...headers(session), Accept: "video/mp4,*/*" },
+      CLIP_MAX_BYTES
+    );
+    checkStatus(response.status, void 0, what);
+    if (!isMp4(response.body)) {
+      throw new import_errors.ApiError(`${what} (not an MP4 video)`, response.status);
+    }
+    return response.body;
+  }
+  /**
    * Sends a command. Only an unknown path tries the next one, as any other answer may mean it has arrived.
    *
    * @param session - Logged-in session
@@ -310,8 +353,11 @@ class RestClient {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  CLIP_MAX_BYTES,
   IMAGE_MAX_BYTES,
   RestClient,
-  imageUrl
+  clipUrl,
+  imageUrl,
+  isMp4
 });
 //# sourceMappingURL=rest.js.map

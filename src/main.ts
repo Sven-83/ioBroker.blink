@@ -37,6 +37,7 @@ import {
 } from './lib/model/session-store';
 import { ArmQueue, MOTION_SWITCH } from './lib/model/arm-queue';
 import { ArmSelection, CONTROL_IDS, SELECTION_KEY } from './lib/model/arm-selection';
+import { ClipStore } from './lib/model/clip-store';
 import { ImageStore } from './lib/model/image-store';
 import { LiveManager } from './lib/model/live-manager';
 import { MotionTracker } from './lib/model/motion';
@@ -83,6 +84,7 @@ class Blink extends utils.Adapter {
     private motion: ArmQueue | undefined;
     private selection: ArmSelection | undefined;
     private images: ImageStore | undefined;
+    private clips: ClipStore | undefined;
     private snapshots: SnapshotQueue | undefined;
     private live: LiveManager | undefined;
     private homescreen: Homescreen | undefined;
@@ -261,8 +263,37 @@ class Blink extends utils.Adapter {
             },
             devices: () => new Set(this.homescreen?.devices.map(device => device.id)),
             write: (deviceId, key, value) => this.tree!.setValue(`cameras.${deviceId}.${key}`, value),
+            newClip: (deviceId, clip) => {
+                this.clips?.want(deviceId, clip);
+                return Promise.resolve();
+            },
+            deletedClips: clipIds => this.clips?.deleted(clipIds) ?? Promise.resolve(),
             debug: message => this.log.debug(message),
         });
+        this.clips = new ClipStore(
+            {
+                download: media =>
+                    this.exclusive(() => this.authorized(session => this.rest!.downloadClip(session, media))),
+                writeFile: (name, data) => this.writeFileAsync(this.namespace, name, data),
+                deleteFile: name => this.delFileAsync(this.namespace, name),
+                readInfos: async () => {
+                    const infos = new Map<number, unknown>();
+                    const states = await this.getStatesAsync('cameras.*.clipInfo');
+                    for (const [id, state] of Object.entries(states ?? {})) {
+                        const match = id.match(/.cameras.(d+).clipInfo$/);
+                        if (match) {
+                            infos.set(Number(match[1]), state?.val);
+                        }
+                    }
+                    return infos;
+                },
+                urlOf: name => `/${this.namespace}/${name}`,
+                debug: message => this.log.debug(message),
+                warn: message => this.log.warn(message),
+            },
+            this.tree,
+            imageRetentionHours(this.config.imageRetentionHours) * 3_600_000,
+        );
         this.images = new ImageStore(
             {
                 download,
@@ -534,6 +565,15 @@ class Blink extends utils.Adapter {
                 this.motionFailing = true;
                 this.log.warn(message);
             }
+        }
+        try {
+            await this.clips?.sync();
+            await this.clips?.expire(Date.now());
+        } catch (err) {
+            if (err instanceof AbortedError) {
+                throw err;
+            }
+            this.log.warn(`Clips not updated: ${describeError(err)}`);
         }
     }
 

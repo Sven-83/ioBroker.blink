@@ -17,8 +17,40 @@ const UNKNOWN_PATH = [404, 405, 410];
 /** Largest image accepted from Blink */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
+/** Largest clip accepted from Blink (a 30 s clip has a few MB) */
+export const CLIP_MAX_BYTES = 50 * 1024 * 1024;
+
 /** The bearer token only goes to hosts of the Blink cloud */
 const BLINK_HOST = /(^|\.)immedia-semi\.com$/;
+
+/**
+ * Address of a clip from the "media" field of the media list.
+ *
+ * @param media - Value of the field, usually a path
+ * @param restOrigin - REST origin of the account
+ * @returns The URL, undefined if it does not point to the Blink cloud
+ */
+export function clipUrl(media: string, restOrigin: string): string | undefined {
+    let url: URL;
+    try {
+        url = new URL(media, restOrigin);
+    } catch {
+        return undefined;
+    }
+    if (url.protocol !== 'https:' || !(url.origin === restOrigin || BLINK_HOST.test(url.hostname))) {
+        return undefined;
+    }
+    return url.toString();
+}
+
+/**
+ * The file is an MP4 video: the box "ftyp" at byte 4.
+ *
+ * @param data - File
+ */
+export function isMp4(data: Buffer): boolean {
+    return data.length > 12 && data.toString('latin1', 4, 8) === 'ftyp';
+}
 
 /**
  * Address of an image from the "thumbnail" field of the homescreen.
@@ -297,6 +329,31 @@ export class RestClient {
         checkStatus(response.status, undefined, what);
         if (response.body[0] !== 0xff || response.body[1] !== 0xd8 || response.body[2] !== 0xff) {
             throw new ApiError(`${what} (not a JPEG)`, response.status);
+        }
+        return response.body;
+    }
+
+    /**
+     * Downloads a motion clip from the cloud. This does not wake the camera.
+     *
+     * @param session - Logged-in session
+     * @param media - Value of the "media" field of the media list
+     * @returns The MP4 file
+     */
+    public async downloadClip(session: Session, media: string): Promise<Buffer> {
+        const what = 'Downloading a Blink clip';
+        const url = clipUrl(media, session.restOrigin);
+        if (!url) {
+            throw new ApiError(`${what} (address outside of Blink)`, 0);
+        }
+        const response = await this.http.download(
+            url,
+            { ...headers(session), Accept: 'video/mp4,*/*' },
+            CLIP_MAX_BYTES,
+        );
+        checkStatus(response.status, undefined, what);
+        if (!isMp4(response.body)) {
+            throw new ApiError(`${what} (not an MP4 video)`, response.status);
         }
         return response.body;
     }

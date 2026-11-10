@@ -101,6 +101,8 @@ function defaultHomescreen() {
  * @param {boolean} [options.motionIgnored] - Motion commands are accepted, but "enabled" never changes
  * @param {object[]} [options.media] - Entries of the media list (motion clips)
  * @param {number} [options.mediaStatus] - HTTP status of the media list (other than 200: error answer)
+ * @param {number} [options.clipStatus] - HTTP status of clip downloads (other than 200: error answer)
+ * @param {string} [options.clipBody] - Answer of clip downloads instead of a video
  */
 async function startFakeBlink(options = {}) {
     const config = {
@@ -124,6 +126,7 @@ async function startFakeBlink(options = {}) {
         motionIgnored: false,
         media: [],
         mediaStatus: 200,
+        clipStatus: 200,
         liveAnswer: {
             command_id: 950,
             server: 'immis://stream-test.immedia-semi.com:443/fake-transaction__IMDS_TEST?client_id=250',
@@ -153,6 +156,7 @@ async function startFakeBlink(options = {}) {
         armOld: 0,
         media: 0,
         mediaSince: [],
+        clip: 0,
         commandStatus: 0,
         snapshot: 0,
         image: 0,
@@ -468,6 +472,24 @@ async function startFakeBlink(options = {}) {
             const id = nextCommandId++;
             commands.set(id, { doneAt: Date.now(), failed: false });
             return send(res, 200, { id, network_id: Number(match[1]), state: 'new' });
+        }
+
+        const clipPath = url.pathname.match(new RegExp(`^/api/v2/accounts/${ACCOUNT_ID}/media/clip/([\\w-]+)\\.mp4$`));
+        if (req.method === 'GET' && clipPath) {
+            stats.clip++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            if (config.clipStatus !== 200) {
+                return send(res, config.clipStatus, { message: 'error' });
+            }
+            if (config.clipBody) {
+                res.writeHead(200, { 'Content-Type': 'text/html' });
+                return res.end(config.clipBody);
+            }
+            // invented bytes with the start of an MP4 box, no real video
+            res.writeHead(200, { 'Content-Type': 'video/mp4' });
+            return res.end(Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from(`ftypisom-fake-${clipPath[1]}`)]));
         }
 
         const imagePath = url.pathname.match(/^\/media\/(\d+)\/thumb-(\d+)\.jpg$/);

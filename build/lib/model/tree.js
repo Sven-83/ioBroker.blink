@@ -155,6 +155,10 @@ const DEVICE_STATES = [
     role: "text",
     states: { pir: "motion sensor", cv_motion: "camera detection" }
   },
+  // last clip (phase 7.3): written by the clip store
+  { key: "clip", name: "Address of the last motion clip", type: "string", role: "url" },
+  { key: "clipTime", name: "Time of the last stored motion clip, 0 if none", type: "number", role: "value.time" },
+  { key: "clipInfo", name: "Internal data of the last clip", type: "string", role: "json" },
   { key: "image", name: "Address of the last image", type: "string", role: "url" },
   { key: "imageTime", name: "Time of the last image, 0 if unknown", type: "number", role: "value.time" },
   { key: "imageInfo", name: "Internal data of the last image", type: "string", role: "json" },

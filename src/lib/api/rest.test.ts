@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { ApiError, BusyError, RateLimitedError, SessionExpiredError } from './errors';
 import { HttpClient } from './http';
 import { OAuthFlow, newHardwareId } from './oauth';
-import { RestClient, imageUrl } from './rest';
+import { RestClient, clipUrl, imageUrl, isMp4 } from './rest';
 import type { Session } from './types';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- plain JS test helper shared with the integration test
@@ -51,6 +51,28 @@ describe('api/rest imageUrl', () => {
         expect(imageUrl('https://immedia-semi.com.evil.example/a.jpg', origin)).to.equal(undefined);
         expect(imageUrl('https://evilimmedia-semi.com/a.jpg', origin)).to.equal(undefined);
         expect(imageUrl('http://rest-e006.immedia-semi.com/a.jpg', origin), 'plain http').to.equal(undefined);
+    });
+});
+
+describe('api/rest clipUrl and isMp4', () => {
+    const origin = 'https://rest-e006.immedia-semi.com';
+
+    it('completes a path without changing it', () => {
+        expect(clipUrl('/api/v2/accounts/1/media/clip/a.mp4', origin)).to.equal(
+            `${origin}/api/v2/accounts/1/media/clip/a.mp4`,
+        );
+    });
+
+    it('never lets the token leave the Blink cloud', () => {
+        expect(clipUrl('https://evil.example/a.mp4', origin)).to.equal(undefined);
+        expect(clipUrl('//evil.example/a.mp4', origin)).to.equal(undefined);
+        expect(clipUrl('http://rest-e006.immedia-semi.com/a.mp4', origin), 'plain http').to.equal(undefined);
+    });
+
+    it('recognises an MP4 by its ftyp box', () => {
+        expect(isMp4(Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom0000')]))).to.equal(true);
+        expect(isMp4(Buffer.from('<html>maintenance</html>'))).to.equal(false);
+        expect(isMp4(Buffer.alloc(4))).to.equal(false);
     });
 });
 
@@ -268,5 +290,27 @@ describe('api/rest', () => {
         cloud.config.imageBody = '<html>maintenance</html>';
         const err = await rejection(rest.downloadImage(session, '/media/3001/thumb-1'));
         expect((err as Error).message).to.contain('not a JPEG');
+    });
+
+    it('downloads a clip and checks that it is an MP4', async () => {
+        const clip = await rest.downloadClip(
+            session,
+            `/api/v2/accounts/${cloud.accountId}/media/clip/clip-video-1.mp4`,
+        );
+        expect(isMp4(clip)).to.equal(true);
+        expect(clip.toString('latin1')).to.contain('fake-clip-video-1');
+    });
+
+    it('refuses a clip outside of the Blink cloud, a missing clip and an answer that is not a video', async () => {
+        const before = cloud.stats.clip;
+        expect(await rejection(rest.downloadClip(session, 'https://evil.example/a.mp4'))).to.be.instanceOf(ApiError);
+        expect(cloud.stats.clip).to.equal(before);
+        const path = `/api/v2/accounts/${cloud.accountId}/media/clip/clip-video-2.mp4`;
+        cloud.config.clipStatus = 404;
+        expect(await rejection(rest.downloadClip(session, path))).to.be.instanceOf(ApiError);
+        cloud.config.clipStatus = 200;
+        cloud.config.clipBody = '<html>maintenance</html>';
+        expect(((await rejection(rest.downloadClip(session, path))) as Error).message).to.contain('not an MP4');
+        delete cloud.config.clipBody;
     });
 });

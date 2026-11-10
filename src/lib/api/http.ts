@@ -3,7 +3,7 @@
  */
 
 import { MAX_REDIRECTS, RATE_LIMIT_FALLBACK_S, REQUEST_TIMEOUT_MS } from './constants';
-import { AbortedError } from './errors';
+import { AbortedError, ApiError } from './errors';
 
 /** Response with the body already read as text */
 export interface HttpResponse {
@@ -218,13 +218,13 @@ export class HttpClient {
             const declared = Number(response.headers.get('content-length'));
             if (declared > maxBytes) {
                 await response.body?.cancel();
-                throw new Error(`Blink image is larger than ${maxBytes} bytes`);
+                throw new ApiError(`Downloading a Blink file (larger than ${maxBytes} bytes)`, response.status);
             }
             const body = Buffer.from(await response.arrayBuffer());
             if (body.length > maxBytes) {
-                throw new Error(`Blink image is larger than ${maxBytes} bytes`);
+                throw new ApiError(`Downloading a Blink file (larger than ${maxBytes} bytes)`, response.status);
             }
-            this.trace?.(`GET <image> -> ${response.status} in ${Date.now() - started} ms, ${body.length} bytes`);
+            this.trace?.(`GET <file> -> ${response.status} in ${Date.now() - started} ms, ${body.length} bytes`);
             return { status: response.status, body };
         }
     }

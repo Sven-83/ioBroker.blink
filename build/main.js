@@ -36,6 +36,7 @@ var import_rest = require("./lib/api/rest");
 var import_session_store = require("./lib/model/session-store");
 var import_arm_queue = require("./lib/model/arm-queue");
 var import_arm_selection = require("./lib/model/arm-selection");
+var import_clip_store = require("./lib/model/clip-store");
 var import_image_store = require("./lib/model/image-store");
 var import_live_manager = require("./lib/model/live-manager");
 var import_motion = require("./lib/model/motion");
@@ -55,6 +56,7 @@ class Blink extends utils.Adapter {
   motion;
   selection;
   images;
+  clips;
   snapshots;
   live;
   homescreen;
@@ -231,8 +233,40 @@ class Blink extends utils.Adapter {
         return new Set((_a = this.homescreen) == null ? void 0 : _a.devices.map((device) => device.id));
       },
       write: (deviceId, key, value) => this.tree.setValue(`cameras.${deviceId}.${key}`, value),
+      newClip: (deviceId, clip) => {
+        var _a;
+        (_a = this.clips) == null ? void 0 : _a.want(deviceId, clip);
+        return Promise.resolve();
+      },
+      deletedClips: (clipIds) => {
+        var _a, _b;
+        return (_b = (_a = this.clips) == null ? void 0 : _a.deleted(clipIds)) != null ? _b : Promise.resolve();
+      },
       debug: (message) => this.log.debug(message)
     });
+    this.clips = new import_clip_store.ClipStore(
+      {
+        download: (media) => this.exclusive(() => this.authorized((session) => this.rest.downloadClip(session, media))),
+        writeFile: (name, data) => this.writeFileAsync(this.namespace, name, data),
+        deleteFile: (name) => this.delFileAsync(this.namespace, name),
+        readInfos: async () => {
+          const infos = /* @__PURE__ */ new Map();
+          const states = await this.getStatesAsync("cameras.*.clipInfo");
+          for (const [id, state] of Object.entries(states != null ? states : {})) {
+            const match = id.match(/.cameras.(d+).clipInfo$/);
+            if (match) {
+              infos.set(Number(match[1]), state == null ? void 0 : state.val);
+            }
+          }
+          return infos;
+        },
+        urlOf: (name) => `/${this.namespace}/${name}`,
+        debug: (message) => this.log.debug(message),
+        warn: (message) => this.log.warn(message)
+      },
+      this.tree,
+      (0, import_config.imageRetentionHours)(this.config.imageRetentionHours) * 36e5
+    );
     this.images = new import_image_store.ImageStore(
       {
         download,
@@ -476,7 +510,7 @@ class Blink extends utils.Adapter {
    * connection. Only a rate limit or a rejected session goes to the normal error handling.
    */
   async updateMotion() {
-    var _a;
+    var _a, _b, _c;
     try {
       await ((_a = this.motionClips) == null ? void 0 : _a.poll(Date.now()));
       if (this.motionFailing) {
@@ -494,6 +528,15 @@ class Blink extends utils.Adapter {
         this.motionFailing = true;
         this.log.warn(message);
       }
+    }
+    try {
+      await ((_b = this.clips) == null ? void 0 : _b.sync());
+      await ((_c = this.clips) == null ? void 0 : _c.expire(Date.now()));
+    } catch (err) {
+      if (err instanceof import_errors.AbortedError) {
+        throw err;
+      }
+      this.log.warn(`Clips not updated: ${(0, import_errors.describeError)(err)}`);
     }
   }
   /**

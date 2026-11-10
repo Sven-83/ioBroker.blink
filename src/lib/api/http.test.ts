@@ -194,7 +194,7 @@ describe('api/http HttpClient download', () => {
         const lines: string[] = [];
         const http = new HttpClient({ testOrigin: origin, trace: line => lines.push(line) });
         await http.download('https://rest.example/image?ts=SECRET', auth, 100);
-        expect(lines[0]).to.match(/^GET <image> -> 200 in \d+ ms, 5 bytes$/);
+        expect(lines[0]).to.match(/^GET <file> -> 200 in \d+ ms, 5 bytes$/);
     });
 });
 

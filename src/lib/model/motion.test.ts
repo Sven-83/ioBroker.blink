@@ -185,3 +185,32 @@ describe('model/motion MotionTracker', () => {
         expect(h.reads[1].since).to.equal(h.reads[0].since);
     });
 });
+
+describe('model/motion MotionTracker callbacks', () => {
+    it('hands a new clip to the clip store and reports deleted clips', async () => {
+        const handed: [number, number][] = [];
+        const deleted: number[][] = [];
+        const tracker = new MotionTracker({
+            read: () =>
+                Promise.resolve({
+                    entries: [entry({ id: 1 }), entry({ id: 2, device_id: 12, deleted: true })],
+                    limit: 25,
+                }),
+            readTimes: () => Promise.resolve(new Map()),
+            devices: () => new Set([11, 12]),
+            write: () => Promise.resolve(),
+            newClip: (deviceId, clip) => {
+                handed.push([deviceId, clip.id]);
+                return Promise.resolve();
+            },
+            deletedClips: ids => {
+                deleted.push([...ids]);
+                return Promise.resolve();
+            },
+            debug: () => undefined,
+        });
+        await tracker.poll(T0 + 1000);
+        expect(handed).to.deep.equal([[11, 1]]);
+        expect(deleted).to.deep.equal([[2]]);
+    });
+});

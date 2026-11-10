@@ -33,6 +33,10 @@ export interface MotionHost {
         key: 'motionTime' | 'motionDetection' | 'motionSource',
         value: string | number,
     ): Promise<unknown>;
+    /** A device has a new motion clip (after its states are written) */
+    newClip?(deviceId: number, clip: MotionClip): Promise<unknown>;
+    /** Clips deleted at Blink (e.g. in the app), by clip ID */
+    deletedClips?(clipIds: Set<number>): Promise<unknown>;
     /** Log message on level debug */
     debug(message: string): void;
 }
@@ -134,14 +138,20 @@ export class MotionTracker {
             // time last: a script that reacts to motionTime finds the other two already set
             await this.host.write(deviceId, 'motionTime', entry.createdAt);
             this.known.set(deviceId, entry.createdAt);
-            this.clips.set(deviceId, {
+            const clip: MotionClip = {
                 id: entry.id,
                 time: entry.createdAt,
                 detections: entry.detections,
                 source: entry.source,
                 lengthMs: entry.lengthMs,
                 media: entry.media,
-            });
+            };
+            this.clips.set(deviceId, clip);
+            await this.host.newClip?.(deviceId, clip);
+        }
+        const deletedIds = new Set(entries.filter(entry => entry.deleted).map(entry => entry.id));
+        if (deletedIds.size > 0) {
+            await this.host.deletedClips?.(deletedIds);
         }
         this.since = now;
         const deleted = entries.filter(entry => entry.deleted).length;

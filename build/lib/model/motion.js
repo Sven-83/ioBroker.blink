@@ -72,7 +72,7 @@ class MotionTracker {
    * @returns Number of devices with a new clip
    */
   async poll(now) {
-    var _a, _b;
+    var _a, _b, _c, _d, _e, _f;
     (_a = this.known) != null ? _a : this.known = await this.host.readTimes();
     if (this.since === void 0) {
       const latest = Math.max(0, ...this.known.values());
@@ -97,14 +97,20 @@ class MotionTracker {
       await this.host.write(deviceId, "motionSource", entry.source);
       await this.host.write(deviceId, "motionTime", entry.createdAt);
       this.known.set(deviceId, entry.createdAt);
-      this.clips.set(deviceId, {
+      const clip = {
         id: entry.id,
         time: entry.createdAt,
         detections: entry.detections,
         source: entry.source,
         lengthMs: entry.lengthMs,
         media: entry.media
-      });
+      };
+      this.clips.set(deviceId, clip);
+      await ((_d = (_c = this.host).newClip) == null ? void 0 : _d.call(_c, deviceId, clip));
+    }
+    const deletedIds = new Set(entries.filter((entry) => entry.deleted).map((entry) => entry.id));
+    if (deletedIds.size > 0) {
+      await ((_f = (_e = this.host).deletedClips) == null ? void 0 : _f.call(_e, deletedIds));
     }
     this.since = now;
     const deleted = entries.filter((entry) => entry.deleted).length;

@@ -781,6 +781,17 @@ tests.integration(path.join(__dirname, '..'), {
                 expect(NOW - since).to.be.within(24 * 3600_000, 24 * 3600_000 + 15 * 60_000);
             });
 
+            it('stores the newest clip per device in the file storage of the instance', async function () {
+                this.timeout(20_000);
+                await waitFor(async () => (await stateVal(harness, 'cameras.3002.clip'))?.length > 0, 'clip of 3002');
+                expect(await stateVal(harness, 'cameras.3001.clip')).to.match(/^\/blink\.0\/clips\/3001\.mp4\?t=\d+$/);
+                expect(await stateVal(harness, 'cameras.3001.clipTime')).to.equal(Date.parse(at(10)));
+                const file = Buffer.from((await harness.objects.readFile(NS, 'clips/3001.mp4')).file);
+                expect(file.toString('latin1', 4, 8)).to.equal('ftyp');
+                expect(file.toString('latin1')).to.contain('clip-video-5002');
+                expect(cloud.stats.clip, 'only the newest clip of each device').to.equal(2);
+            });
+
             it('keeps clip addresses, password, e-mail address and tokens out of states and log', async () => {
                 await expectNoSecrets(harness, [
                     cloud.email,

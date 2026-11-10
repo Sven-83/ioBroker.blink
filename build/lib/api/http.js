@@ -172,13 +172,13 @@ class HttpClient {
       const declared = Number(response.headers.get("content-length"));
       if (declared > maxBytes) {
         await ((_c = response.body) == null ? void 0 : _c.cancel());
-        throw new Error(`Blink image is larger than ${maxBytes} bytes`);
+        throw new import_errors.ApiError(`Downloading a Blink file (larger than ${maxBytes} bytes)`, response.status);
       }
       const body = Buffer.from(await response.arrayBuffer());
       if (body.length > maxBytes) {
-        throw new Error(`Blink image is larger than ${maxBytes} bytes`);
+        throw new import_errors.ApiError(`Downloading a Blink file (larger than ${maxBytes} bytes)`, response.status);
       }
-      (_d = this.trace) == null ? void 0 : _d.call(this, `GET <image> -> ${response.status} in ${Date.now() - started} ms, ${body.length} bytes`);
+      (_d = this.trace) == null ? void 0 : _d.call(this, `GET <file> -> ${response.status} in ${Date.now() - started} ms, ${body.length} bytes`);
       return { status: response.status, body };
     }
   }
