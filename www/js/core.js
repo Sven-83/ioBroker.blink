@@ -34,6 +34,17 @@
             batteryLow: 'Akku schwach',
             motionOff: 'Bewegung aus',
             noImage: 'kein Bild',
+            clip: 'Clip',
+            clipHint: 'Letzten Bewegungs-Clip abspielen',
+            clipFailed: 'Clip lässt sich nicht abspielen (vielleicht schon gelöscht)',
+            motion: 'Bewegung',
+            nowShort: 'jetzt',
+            minutesShort: '{n} Min',
+            hoursShort: '{n} Std',
+            'detect.person': 'Person',
+            'detect.animal': 'Tier',
+            'detect.vehicle': 'Fahrzeug',
+            'detect.package': 'Paket',
             justNow: 'gerade eben',
             minutesAgo: 'vor {n} Min',
             hoursAgo: 'vor {n} Std',
@@ -98,6 +109,17 @@
             batteryLow: 'Battery low',
             motionOff: 'Motion off',
             noImage: 'no image',
+            clip: 'Clip',
+            clipHint: 'Play the last motion clip',
+            clipFailed: 'Clip cannot be played (maybe already deleted)',
+            motion: 'Motion',
+            nowShort: 'now',
+            minutesShort: '{n} min',
+            hoursShort: '{n} h',
+            'detect.person': 'Person',
+            'detect.animal': 'Animal',
+            'detect.vehicle': 'Vehicle',
+            'detect.package': 'Package',
             justNow: 'just now',
             minutesAgo: '{n} min ago',
             hoursAgo: '{n} h ago',
@@ -417,6 +439,46 @@
         return bands.reduce((sum, band) => sum + band, 0) + Math.max(0, bands.length - 1) * box.gap;
     }
 
+    /** The motion marker is shown this long after the last motion clip */
+    const MOTION_SHOWN_MS = 24 * 3_600_000;
+
+    /**
+     * Marker of the last motion clip: what was detected (or "Motion") and how long ago, empty if there was
+     * none in the last 24 hours.
+     *
+     * @param {'de'|'en'} lang - Language
+     * @param {unknown} time - motionTime
+     * @param {unknown} detection - motionDetection, e.g. "person" or "person,animal"
+     * @param {number} now - Current time
+     * @returns {{text: string, short: string, detected: boolean}} text in full, short for the small marker
+     */
+    function motionBadge(lang, time, detection, now) {
+        if (typeof time !== 'number' || !Number.isFinite(time) || time <= 0 || now - time > MOTION_SHOWN_MS) {
+            return { text: '', short: '', detected: false };
+        }
+        const names = (typeof detection === 'string' ? detection.split(',') : [])
+            .map(name => name.trim())
+            .filter(name => /^[a-z][a-z_]{0,29}$/.test(name))
+            .map(name => {
+                const key = `detect.${name}`;
+                const text = t(lang, key);
+                return text === key ? name : text;
+            });
+        const label = names.length > 0 ? names.join(', ') : t(lang, 'motion');
+        const minutes = Math.floor(Math.max(0, now - time) / 60_000);
+        const age =
+            minutes < 1
+                ? t(lang, 'nowShort')
+                : minutes < 60
+                  ? t(lang, 'minutesShort', minutes)
+                  : t(lang, 'hoursShort', Math.floor(minutes / 60));
+        return {
+            text: `${label} · ${formatAge(lang, time, now)}`,
+            short: names.length > 0 ? `${names.join(', ')} ${age}` : age,
+            detected: names.length > 0,
+        };
+    }
+
     /**
      * Small markers of a camera, in display order.
      *
@@ -460,5 +522,6 @@
         fitColumns,
         overviewHeight,
         cameraBadges,
+        motionBadge,
     };
 });

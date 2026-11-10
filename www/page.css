@@ -8,14 +8,18 @@
     font-style: normal;
     font-weight: 100 900;
     font-display: swap;
-    src: url(fonts/fraunces.woff2) format('woff2-variations'), url(fonts/fraunces.woff2) format('woff2');
+    src:
+        url(fonts/fraunces.woff2) format('woff2-variations'),
+        url(fonts/fraunces.woff2) format('woff2');
 }
 @font-face {
     font-family: 'Work Sans';
     font-style: normal;
     font-weight: 100 900;
     font-display: swap;
-    src: url(fonts/work-sans.woff2) format('woff2-variations'), url(fonts/work-sans.woff2) format('woff2');
+    src:
+        url(fonts/work-sans.woff2) format('woff2-variations'),
+        url(fonts/work-sans.woff2) format('woff2');
 }
 :root {
     --bg-deep: #101a14;
@@ -46,8 +50,7 @@ body {
     overflow: hidden;
     background:
         radial-gradient(ellipse at 20% -10%, #1e3225 0%, transparent 55%),
-        radial-gradient(ellipse at 100% 110%, #16261b 0%, transparent 50%),
-        var(--bg-deep);
+        radial-gradient(ellipse at 100% 110%, #16261b 0%, transparent 50%), var(--bg-deep);
     color: var(--text-parchment);
     font-family: 'Work Sans', sans-serif;
     -webkit-user-select: none;
@@ -471,6 +474,32 @@ body {
     border-color: var(--alert);
     color: #f0a08c;
 }
+.badge-motion {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    border-color: var(--border-brass-lit);
+    color: var(--text-parchment);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.badge-motion svg {
+    width: 1.15em;
+    height: 1.15em;
+    flex-shrink: 0;
+}
+.badge-clip {
+    cursor: pointer;
+    background: rgba(40, 32, 18, 0.92);
+}
+.badge-clip:active {
+    transform: scale(0.96);
+}
+.badge-detected {
+    border-color: var(--amber);
+    color: var(--amber-bright);
+}
 .badge-batteryLow {
     border-color: var(--amber);
     color: var(--amber-bright);
@@ -632,10 +661,13 @@ body {
     background: #000;
     border: 1px solid var(--border-brass);
 }
-.live-frame img {
+.live-frame img,
+.live-frame video {
     width: 100%;
     height: 100%;
     object-fit: contain;
+    display: block;
+    background: #000;
 }
 .live-status {
     position: absolute;

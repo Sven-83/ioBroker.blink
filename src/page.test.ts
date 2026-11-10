@@ -165,6 +165,34 @@ describe('camera page core', () => {
         expect(core.fitColumns({ ...box, height: 100, counts: [4] })).to.equal(4);
     });
 
+    it('shows the last motion of the day with what was detected', () => {
+        const now = Date.parse('2026-01-01T12:00:00Z');
+        expect(core.motionBadge('de', now - 5 * 60_000, 'person', now)).to.deep.equal({
+            text: 'Person · vor 5 Min',
+            short: 'Person 5 Min',
+            detected: true,
+        });
+        expect(core.motionBadge('de', now - 20_000, '', now)).to.deep.equal({
+            text: 'Bewegung · gerade eben',
+            short: 'jetzt',
+            detected: false,
+        });
+        expect(core.motionBadge('en', now - 3 * 3_600_000, 'vehicle,dog', now)).to.include({
+            text: 'Vehicle, dog · 3 h ago',
+            short: 'Vehicle, dog 3 h',
+        });
+        expect(core.motionBadge('de', now - 40 * 60_000, '', now).short).to.equal('40 Min');
+        // older than a day, nothing known or odd names: no marker, no markup
+        expect(core.motionBadge('de', now - 25 * 3_600_000, 'person', now).text).to.equal('');
+        expect(core.motionBadge('de', 0, 'person', now).text).to.equal('');
+        expect(core.motionBadge('de', now, '<b>x</b>', now).text).to.equal('Bewegung · gerade eben');
+    });
+
+    it('accepts the stored clip of its own instance like an image', () => {
+        expect(core.imageSrc(NS, '/blink.0/clips/300.mp4?t=1234', 0)).to.equal('../blink.0/clips/300.mp4?t=1234');
+        expect(core.imageSrc(NS, '/blink.0/../x.mp4', 0)).to.equal('');
+    });
+
     it('marks cameras that are offline, have a low battery or no motion detection', () => {
         expect(core.cameraBadges({ status: 'done', batteryLow: false, enabled: true })).to.deep.equal([]);
         expect(core.cameraBadges({ status: 'online', batteryLow: undefined, enabled: undefined })).to.deep.equal([]);

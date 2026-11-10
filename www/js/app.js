@@ -448,8 +448,10 @@
             enabled: undefined,
         });
         card.element.classList.toggle('offline', badges.includes('offline'));
+        const hasClip = !!C.imageSrc(namespace, val(`${base}.clip`), val(`${base}.clipTime`));
+        const motionMark = C.motionBadge(lang, val(`${base}.motionTime`), val(`${base}.motionDetection`), now);
         const box = q('.cam-badges');
-        const key = badges.join(',');
+        const key = `${badges.join(',')}|${motionMark.text}|${hasClip}`;
         if (box.dataset.key !== key) {
             box.dataset.key = key;
             box.textContent = '';
@@ -458,6 +460,23 @@
                 span.className = `badge badge-${badge}`;
                 span.textContent = C.t(lang, badge);
                 box.appendChild(span);
+            }
+            if (motionMark.text) {
+                // with a stored clip the marker plays it; without, it only tells when the last motion was
+                const mark = document.createElement('span');
+                mark.className = `badge badge-motion${motionMark.detected ? ' badge-detected' : ''}${hasClip ? ' badge-clip' : ''}`;
+                mark.innerHTML = hasClip ? ICON_PLAY : ICON_MOTION;
+                mark.appendChild(document.createTextNode(motionMark.short));
+                mark.title = hasClip ? `${motionMark.text} – ${C.t(lang, 'clipHint')}` : motionMark.text;
+                if (hasClip) {
+                    mark.setAttribute('role', 'button');
+                    mark.tabIndex = 0;
+                    onActivate(mark, event => {
+                        event.stopPropagation();
+                        openClip(card.camera);
+                    });
+                }
+                box.appendChild(mark);
             }
         }
     }
@@ -628,11 +647,52 @@
         }
     }
 
+    // ------------------------------------------------------------ clip
+
+    const ICON_PLAY =
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></svg>';
+    const ICON_MOTION =
+        '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4 M16.2 7.8a6 6 0 0 1 0 8.4"/></svg>';
+
+    function openClip(camera) {
+        const base = `cameras.${camera.id}`;
+        const src = C.imageSrc(namespace, val(`${base}.clip`), val(`${base}.clipTime`));
+        if (!src || live) {
+            return;
+        }
+        const mark = C.motionBadge(lang, val(`${base}.motionTime`), val(`${base}.motionDetection`), Date.now());
+        $('clip-name').textContent = mark.text ? `${camera.name} · ${mark.text}` : camera.name;
+        $('clip-status').textContent = '';
+        const video = $('clip-video');
+        video.onerror = () => {
+            $('clip-status').textContent = C.t(lang, 'clipFailed');
+        };
+        video.src = src;
+        $('clip').classList.add('show');
+        // autoplay may be refused by the browser; the controls stay usable
+        const playing = video.play();
+        if (playing && typeof playing.catch === 'function') {
+            playing.catch(() => undefined);
+        }
+    }
+
+    function closeClip() {
+        const video = $('clip-video');
+        video.pause();
+        video.onerror = null;
+        video.removeAttribute('src');
+        // releases the file and stops loading
+        video.load();
+        $('clip').classList.remove('show');
+    }
+
     // ------------------------------------------------------------ start
 
     function start() {
         $('live-close').title = C.t(lang, 'close');
         onActivate($('live-close'), closeLive);
+        $('clip-close').title = C.t(lang, 'close');
+        onActivate($('clip-close'), closeClip);
         onActivate($('view-toggle'), () => setView(view === 'all' ? 'tabs' : 'all'));
         setupPin();
         layout();
@@ -640,6 +700,7 @@
             layout();
         });
         window.addEventListener('pagehide', closeLive);
+        window.addEventListener('pagehide', closeClip);
         if (!window.io || typeof window.io.connect !== 'function') {
             showBanner('noSocket');
             return;
