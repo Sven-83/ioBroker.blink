@@ -99,6 +99,8 @@ function defaultHomescreen() {
  * @param {object} [options.liveAnswer] - Answer to the start of a live session
  * @param {number} [options.motionNewPathStatus] - HTTP status of the current motion path of cameras
  * @param {boolean} [options.motionIgnored] - Motion commands are accepted, but "enabled" never changes
+ * @param {object[]} [options.media] - Entries of the media list (motion clips)
+ * @param {number} [options.mediaStatus] - HTTP status of the media list (other than 200: error answer)
  */
 async function startFakeBlink(options = {}) {
     const config = {
@@ -120,6 +122,8 @@ async function startFakeBlink(options = {}) {
         imageStatus: 200,
         motionNewPathStatus: 200,
         motionIgnored: false,
+        media: [],
+        mediaStatus: 200,
         liveAnswer: {
             command_id: 950,
             server: 'immis://stream-test.immedia-semi.com:443/fake-transaction__IMDS_TEST?client_id=250',
@@ -147,6 +151,8 @@ async function startFakeBlink(options = {}) {
         homescreenRequests: 0,
         armNew: 0,
         armOld: 0,
+        media: 0,
+        mediaSince: [],
         commandStatus: 0,
         snapshot: 0,
         image: 0,
@@ -235,7 +241,10 @@ async function startFakeBlink(options = {}) {
 
     const send = (res, status, body, headers = {}) => {
         const text = typeof body === 'string' ? body : JSON.stringify(body);
-        res.writeHead(status, { 'Content-Type': typeof body === 'string' ? 'text/html' : 'application/json', ...headers });
+        res.writeHead(status, {
+            'Content-Type': typeof body === 'string' ? 'text/html' : 'application/json',
+            ...headers,
+        });
         res.end(text);
     };
 
@@ -263,7 +272,10 @@ async function startFakeBlink(options = {}) {
             }
             const newSid = randomBytes(8).toString('hex');
             sessions.set(newSid, { challenge: url.searchParams.get('code_challenge'), csrf: `csrf-${newSid}` });
-            return send(res, 302, '', { Location: '/oauth/v2/signin', 'Set-Cookie': `sid=${newSid}; Path=/; HttpOnly` });
+            return send(res, 302, '', {
+                Location: '/oauth/v2/signin',
+                'Set-Cookie': `sid=${newSid}; Path=/; HttpOnly`,
+            });
         }
 
         if (req.method === 'GET' && url.pathname === '/oauth/v2/signin') {
@@ -325,7 +337,11 @@ async function startFakeBlink(options = {}) {
                 stats.tokens++;
                 const challenge = codes.get(form.get('code'));
                 codes.delete(form.get('code'));
-                const expected = challenge && createHash('sha256').update(form.get('code_verifier') || '').digest('base64url');
+                const expected =
+                    challenge &&
+                    createHash('sha256')
+                        .update(form.get('code_verifier') || '')
+                        .digest('base64url');
                 if (!challenge || expected !== challenge || !form.get('hardware_id')) {
                     return send(res, 400, { error: 'invalid_grant' });
                 }
@@ -364,6 +380,27 @@ async function startFakeBlink(options = {}) {
             }
             stats.homescreen++;
             return send(res, 200, config.homescreen);
+        }
+
+        if (req.method === 'GET' && url.pathname === `/api/v1/accounts/${ACCOUNT_ID}/media/changed`) {
+            stats.media++;
+            if (!accessTokens.has(bearer)) {
+                return send(res, 401, { message: 'Unauthorized Access', code: 101 });
+            }
+            if (config.mediaStatus !== 200) {
+                return send(res, config.mediaStatus, { message: 'error' });
+            }
+            const since = Date.parse(url.searchParams.get('since') || '');
+            stats.mediaSince.push(since);
+            const page = Number(url.searchParams.get('page') || 1);
+            const changed = config.media.filter(item => !(Date.parse(item.updated_at) < since));
+            const limit = 25;
+            return send(res, 200, {
+                limit,
+                purge_id: 1,
+                refresh_count: 0,
+                media: changed.slice((page - 1) * limit, page * limit),
+            });
         }
 
         const armNew = url.pathname.match(

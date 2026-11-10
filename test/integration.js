@@ -183,7 +183,9 @@ tests.integration(path.join(__dirname, '..'), {
                     '2FA state',
                 );
                 expect(harness.hasLog(/sms to \+49\*{6}99/, 'warn')).to.equal(true);
-                expect(await stateVal(harness, 'auth.pending')).to.be.a('string').and.not.to.equal('');
+                expect(await stateVal(harness, 'auth.pending'))
+                    .to.be.a('string')
+                    .and.not.to.equal('');
                 expect(cloud.stats.codesSent).to.equal(1);
             });
 
@@ -344,7 +346,10 @@ tests.integration(path.join(__dirname, '..'), {
 
                 const requests = cloud.stats.homescreenRequests;
                 await restart(harness, { [ENV_KEY]: cloud.origin });
-                await waitFor(async () => (await stateVal(harness, 'info.loginState')) === 'rateLimited', 'still waiting');
+                await waitFor(
+                    async () => (await stateVal(harness, 'info.loginState')) === 'rateLimited',
+                    'still waiting',
+                );
                 await new Promise(resolve => setTimeout(resolve, 3_000));
                 expect(cloud.stats.homescreenRequests).to.equal(requests);
             });
@@ -369,8 +374,7 @@ tests.integration(path.join(__dirname, '..'), {
                     `result ${result}`,
                     timeoutMs,
                 );
-            const clearResult = () =>
-                harness.states.setState(`${NS}.networks.1001.armResult`, { val: '', ack: true });
+            const clearResult = () => harness.states.setState(`${NS}.networks.1001.armResult`, { val: '', ack: true });
 
             before(async function () {
                 this.timeout(60_000);
@@ -608,7 +612,10 @@ tests.integration(path.join(__dirname, '..'), {
 
             it('fetches the last images without waking a camera', async function () {
                 this.timeout(20_000);
-                await waitFor(async () => (await stateVal(harness, 'cameras.3002.image'))?.length > 0, 'image of the Mini');
+                await waitFor(
+                    async () => (await stateVal(harness, 'cameras.3002.image'))?.length > 0,
+                    'image of the Mini',
+                );
                 expect(await stateVal(harness, `${CAM}.image`)).to.match(/^\/blink\.0\/cameras\/3001\.jpg\?t=\d+$/);
                 expect(await stateVal(harness, `${CAM}.imageTime`)).to.equal(1_700_000_000_000);
                 expect(await stateVal(harness, 'cameras.3002.imageTime'), 'no time in the address').to.equal(0);
@@ -621,7 +628,11 @@ tests.integration(path.join(__dirname, '..'), {
                 const before = await stateVal(harness, `${CAM}.image`);
                 cloud.config.snapshotDelayMs = 1_500;
                 await press(CAM);
-                await waitFor(async () => (await stateVal(harness, `${CAM}.snapshotPending`)) === true, 'pending', 1_000);
+                await waitFor(
+                    async () => (await stateVal(harness, `${CAM}.snapshotPending`)) === true,
+                    'pending',
+                    1_000,
+                );
 
                 await waitForResult(CAM, 'confirmed');
                 expect(await stateVal(harness, `${CAM}.image`)).to.not.equal(before);
@@ -682,14 +693,102 @@ tests.integration(path.join(__dirname, '..'), {
             it('asks a Mini over its own path', async function () {
                 this.timeout(15_000);
                 const paths = () =>
-                    cloud.requests.filter(item => item.method === 'POST' && /thumbnail$/.test(item.path)).map(item => item.path);
+                    cloud.requests
+                        .filter(item => item.method === 'POST' && /thumbnail$/.test(item.path))
+                        .map(item => item.path);
                 await press('cameras.3002');
                 await waitForResult('cameras.3002', 'confirmed');
                 expect(paths().pop()).to.match(/\/networks\/1001\/owls\/3002\/thumbnail$/);
             });
 
             it('keeps the address at Blink, password, e-mail address and tokens out of states and log', async () => {
-                await expectNoSecrets(harness, [cloud.email, cloud.password, '/media/', ...cloud.issuedTokens()]);
+                await expectNoSecrets(harness, [cloud.email, cloud.password, '/thumb-', ...cloud.issuedTokens()]);
+            });
+        });
+
+        suite('Motion clips', getHarness => {
+            let harness;
+            let cloud;
+            const NOW = Date.now();
+            const at = minutesAgo => new Date(NOW - minutesAgo * 60_000).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+            // invented entries in the format seen on a real account (no real IDs)
+            const clip = (id, deviceId, minutesAgo, extra = {}) => ({
+                id,
+                created_at: at(minutesAgo),
+                updated_at: at(minutesAgo),
+                deleted: false,
+                device: 'catalina',
+                device_id: deviceId,
+                device_name: `Device ${deviceId}`,
+                network_id: 1001,
+                network_name: 'Test',
+                type: 'video',
+                source: 'pir',
+                partial: false,
+                watched: false,
+                thumbnail: `/api/v2/accounts/4242/media/thumb/clip-thumb-${id}`,
+                media: `/api/v2/accounts/4242/media/clip/clip-video-${id}.mp4`,
+                metadata: '{"pts_length_ms":20000}',
+                additional_devices: [],
+                time_zone: 'Europe/Berlin',
+                ...extra,
+            });
+
+            before(async function () {
+                this.timeout(60_000);
+                harness = getHarness();
+                cloud = await startFakeBlink({
+                    media: [
+                        clip(5001, 3001, 30),
+                        clip(5002, 3001, 10, {
+                            source: 'cv_motion',
+                            metadata: '{"pts_length_ms":9000,"cv_detection":["person"]}',
+                        }),
+                        clip(5003, 3001, 5, { deleted: true }),
+                        clip(5004, 3001, 4, { source: 'snapshot' }),
+                        clip(5005, 3002, 20),
+                        clip(5006, 9999, 3),
+                        clip(5007, 3003, 60 * 30),
+                    ],
+                });
+                await harness.changeAdapterConfig('blink', {
+                    native: { email: cloud.email, password: cloud.password, pin: '', pollInterval: 3600 },
+                });
+                await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
+                await waitFor(
+                    async () => (await stateVal(harness, 'cameras.3001.motionTime')) > 0,
+                    'first motion clip',
+                );
+            });
+
+            after(async () => {
+                await cloud?.close();
+            });
+
+            it('writes the newest motion clip per device with its detection', async () => {
+                expect(await stateVal(harness, 'cameras.3001.motionTime')).to.equal(Date.parse(at(10)));
+                expect(await stateVal(harness, 'cameras.3001.motionDetection')).to.equal('person');
+                expect(await stateVal(harness, 'cameras.3001.motionSource')).to.equal('cv_motion');
+                expect(await stateVal(harness, 'cameras.3002.motionTime')).to.equal(Date.parse(at(20)));
+                expect(await stateVal(harness, 'cameras.3002.motionDetection')).to.equal('');
+                expect(await stateVal(harness, 'cameras.3002.motionSource')).to.equal('pir');
+            });
+
+            it('looks back one day at most and leaves devices without a clip alone', async () => {
+                expect(await stateVal(harness, 'cameras.3003.motionTime'), 'clip older than a day').to.equal(undefined);
+                expect(await harness.states.getState(`${NS}.cameras.9999.motionTime`), 'unknown device').to.equal(null);
+                const since = cloud.stats.mediaSince[0];
+                expect(NOW - since).to.be.within(24 * 3600_000, 24 * 3600_000 + 15 * 60_000);
+            });
+
+            it('keeps clip addresses, password, e-mail address and tokens out of states and log', async () => {
+                await expectNoSecrets(harness, [
+                    cloud.email,
+                    cloud.password,
+                    'clip-video-',
+                    'clip-thumb-',
+                    ...cloud.issuedTokens(),
+                ]);
             });
         });
 

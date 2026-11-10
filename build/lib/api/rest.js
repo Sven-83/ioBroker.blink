@@ -111,6 +111,23 @@ class RestClient {
     return homescreen;
   }
   /**
+   * One page of the media list (motion clips) changed since a point in time. Phase 7.1: the answer is returned
+   * as parsed JSON, its format is checked against the real account first.
+   *
+   * @param session - Logged-in session
+   * @param since - Point in time (ms)
+   * @param page - Page, starting with 1
+   */
+  async mediaChanged(session, since, page) {
+    const query = `since=${encodeURIComponent(new Date(since).toISOString())}&page=${page}`;
+    const response = await this.http.request(
+      `${session.restOrigin}/api/v1/accounts/${session.accountId}/media/changed?${query}`,
+      { headers: headers(session) }
+    );
+    check(response, "Reading the Blink media list");
+    return (0, import_http.parseJson)(response.body);
+  }
+  /**
    * Arms or disarms a network: current path of the app first, the older one only if that path is unknown.
    * Only an unknown path is retried, as any other answer may mean the command has arrived.
    *

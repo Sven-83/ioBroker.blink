@@ -13,6 +13,7 @@ import { connect as netConnect, isIP } from 'node:net';
 import { connect as tlsConnect } from 'node:tls';
 import {
     AbortedError,
+    ApiError,
     CredentialsRejectedError,
     RateLimitedError,
     SessionExpiredError,
@@ -22,6 +23,7 @@ import {
 import { HttpClient } from './lib/api/http';
 import type { BlinkDevice, Homescreen } from './lib/api/homescreen';
 import { pinnedCertificateError, type ImmiSocket } from './lib/api/immi';
+import { describeMediaPage, parseMediaPage } from './lib/api/media';
 import { STREAM_CERT_PEM } from './lib/api/stream-certificate';
 import { OAuthFlow, newHardwareId } from './lib/api/oauth';
 import { RestClient } from './lib/api/rest';
@@ -37,6 +39,7 @@ import { ArmQueue, MOTION_SWITCH } from './lib/model/arm-queue';
 import { ArmSelection, CONTROL_IDS, SELECTION_KEY } from './lib/model/arm-selection';
 import { ImageStore } from './lib/model/image-store';
 import { LiveManager } from './lib/model/live-manager';
+import { MotionTracker } from './lib/model/motion';
 import { SnapshotQueue } from './lib/model/snapshot-queue';
 import { ObjectTree } from './lib/model/tree';
 import {
@@ -83,6 +86,9 @@ class Blink extends utils.Adapter {
     private snapshots: SnapshotQueue | undefined;
     private live: LiveManager | undefined;
     private homescreen: Homescreen | undefined;
+    private motionClips: MotionTracker | undefined;
+    /** The last motion poll failed (warn once, then debug until it works again) */
+    private motionFailing = false;
     /** Requests of the cloud run one after the other, see exclusive() */
     private lane: Promise<unknown> = Promise.resolve();
     private session: Session | undefined;
@@ -230,6 +236,33 @@ class Blink extends utils.Adapter {
         });
         const download = (thumbnail: string): Promise<Buffer> =>
             this.exclusive(() => this.authorized(session => this.rest!.downloadImage(session, thumbnail)));
+        this.motionClips = new MotionTracker({
+            read: async (since, page) => {
+                const body = await this.exclusive(() =>
+                    this.authorized(session => this.rest!.mediaChanged(session, since, page)),
+                );
+                const parsed = parseMediaPage(body);
+                if (!parsed) {
+                    this.log.debug(`Media list: ${describeMediaPage(body)}`);
+                    throw new ApiError('Reading the Blink media list (unexpected answer)', 200);
+                }
+                return parsed;
+            },
+            readTimes: async () => {
+                const times = new Map<number, number>();
+                const states = await this.getStatesAsync('cameras.*.motionTime');
+                for (const [id, state] of Object.entries(states ?? {})) {
+                    const match = id.match(/\.cameras\.(\d+)\.motionTime$/);
+                    if (match && typeof state?.val === 'number' && state.val > 0) {
+                        times.set(Number(match[1]), state.val);
+                    }
+                }
+                return times;
+            },
+            devices: () => new Set(this.homescreen?.devices.map(device => device.id)),
+            write: (deviceId, key, value) => this.tree!.setValue(`cameras.${deviceId}.${key}`, value),
+            debug: message => this.log.debug(message),
+        });
         this.images = new ImageStore(
             {
                 download,
@@ -472,9 +505,35 @@ class Blink extends utils.Adapter {
                     `${homescreen.syncModules.length} Sync Modules, ${homescreen.devices.length} devices`,
             );
             await this.updateImages(homescreen);
+            await this.updateMotion();
             this.schedule(pollDelayMs(this.pollSeconds), () => this.poll());
         } catch (err) {
             await this.handleFailure(err);
+        }
+    }
+
+    /**
+     * Motion clips are extras like images: a problem with them is logged once and does not count as a lost
+     * connection. Only a rate limit or a rejected session goes to the normal error handling.
+     */
+    private async updateMotion(): Promise<void> {
+        try {
+            await this.motionClips?.poll(Date.now());
+            if (this.motionFailing) {
+                this.motionFailing = false;
+                this.log.info('Motion clips can be read again');
+            }
+        } catch (err) {
+            if (err instanceof RateLimitedError || err instanceof SessionExpiredError || err instanceof AbortedError) {
+                throw err;
+            }
+            const message = `Motion clips not read: ${describeError(err)}`;
+            if (this.motionFailing) {
+                this.log.debug(message);
+            } else {
+                this.motionFailing = true;
+                this.log.warn(message);
+            }
         }
     }
 

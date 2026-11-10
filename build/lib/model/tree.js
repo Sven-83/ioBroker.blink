@@ -140,6 +140,21 @@ const DEVICE_STATES = [
       throttled: "image is still recent"
     }
   },
+  // motion clips (phase 7.2): written by the motion tracker, not from the homescreen
+  { key: "motionTime", name: "Time of the last motion clip", type: "number", role: "value.time" },
+  {
+    key: "motionDetection",
+    name: "Detected in the last motion clip (person, animal, vehicle, package), empty if nothing",
+    type: "string",
+    role: "text"
+  },
+  {
+    key: "motionSource",
+    name: "What started the last motion clip",
+    type: "string",
+    role: "text",
+    states: { pir: "motion sensor", cv_motion: "camera detection" }
+  },
   { key: "image", name: "Address of the last image", type: "string", role: "url" },
   { key: "imageTime", name: "Time of the last image, 0 if unknown", type: "number", role: "value.time" },
   { key: "imageInfo", name: "Internal data of the last image", type: "string", role: "json" },

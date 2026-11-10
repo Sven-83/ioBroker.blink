@@ -29,6 +29,7 @@ var import_node_tls = require("node:tls");
 var import_errors = require("./lib/api/errors");
 var import_http = require("./lib/api/http");
 var import_immi = require("./lib/api/immi");
+var import_media = require("./lib/api/media");
 var import_stream_certificate = require("./lib/api/stream-certificate");
 var import_oauth = require("./lib/api/oauth");
 var import_rest = require("./lib/api/rest");
@@ -37,6 +38,7 @@ var import_arm_queue = require("./lib/model/arm-queue");
 var import_arm_selection = require("./lib/model/arm-selection");
 var import_image_store = require("./lib/model/image-store");
 var import_live_manager = require("./lib/model/live-manager");
+var import_motion = require("./lib/model/motion");
 var import_snapshot_queue = require("./lib/model/snapshot-queue");
 var import_tree = require("./lib/model/tree");
 var import_config = require("./lib/util/config");
@@ -56,6 +58,9 @@ class Blink extends utils.Adapter {
   snapshots;
   live;
   homescreen;
+  motionClips;
+  /** The last motion poll failed (warn once, then debug until it works again) */
+  motionFailing = false;
   /** Requests of the cloud run one after the other, see exclusive() */
   lane = Promise.resolve();
   session;
@@ -198,6 +203,36 @@ class Blink extends utils.Adapter {
       info: (message) => this.log.info(message)
     });
     const download = (thumbnail) => this.exclusive(() => this.authorized((session) => this.rest.downloadImage(session, thumbnail)));
+    this.motionClips = new import_motion.MotionTracker({
+      read: async (since, page) => {
+        const body = await this.exclusive(
+          () => this.authorized((session) => this.rest.mediaChanged(session, since, page))
+        );
+        const parsed = (0, import_media.parseMediaPage)(body);
+        if (!parsed) {
+          this.log.debug(`Media list: ${(0, import_media.describeMediaPage)(body)}`);
+          throw new import_errors.ApiError("Reading the Blink media list (unexpected answer)", 200);
+        }
+        return parsed;
+      },
+      readTimes: async () => {
+        const times = /* @__PURE__ */ new Map();
+        const states = await this.getStatesAsync("cameras.*.motionTime");
+        for (const [id, state] of Object.entries(states != null ? states : {})) {
+          const match = id.match(/\.cameras\.(\d+)\.motionTime$/);
+          if (match && typeof (state == null ? void 0 : state.val) === "number" && state.val > 0) {
+            times.set(Number(match[1]), state.val);
+          }
+        }
+        return times;
+      },
+      devices: () => {
+        var _a;
+        return new Set((_a = this.homescreen) == null ? void 0 : _a.devices.map((device) => device.id));
+      },
+      write: (deviceId, key, value) => this.tree.setValue(`cameras.${deviceId}.${key}`, value),
+      debug: (message) => this.log.debug(message)
+    });
     this.images = new import_image_store.ImageStore(
       {
         download,
@@ -430,9 +465,35 @@ class Blink extends utils.Adapter {
         `Poll took ${Date.now() - started} ms: ${homescreen.networks.length} networks, ${homescreen.syncModules.length} Sync Modules, ${homescreen.devices.length} devices`
       );
       await this.updateImages(homescreen);
+      await this.updateMotion();
       this.schedule((0, import_config.pollDelayMs)(this.pollSeconds), () => this.poll());
     } catch (err) {
       await this.handleFailure(err);
+    }
+  }
+  /**
+   * Motion clips are extras like images: a problem with them is logged once and does not count as a lost
+   * connection. Only a rate limit or a rejected session goes to the normal error handling.
+   */
+  async updateMotion() {
+    var _a;
+    try {
+      await ((_a = this.motionClips) == null ? void 0 : _a.poll(Date.now()));
+      if (this.motionFailing) {
+        this.motionFailing = false;
+        this.log.info("Motion clips can be read again");
+      }
+    } catch (err) {
+      if (err instanceof import_errors.RateLimitedError || err instanceof import_errors.SessionExpiredError || err instanceof import_errors.AbortedError) {
+        throw err;
+      }
+      const message = `Motion clips not read: ${(0, import_errors.describeError)(err)}`;
+      if (this.motionFailing) {
+        this.log.debug(message);
+      } else {
+        this.motionFailing = true;
+        this.log.warn(message);
+      }
     }
   }
   /**
