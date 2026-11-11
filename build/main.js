@@ -701,6 +701,11 @@ class Blink extends utils.Adapter {
       if (answer && typeof answer === "object" && "error" in answer && answer.error) {
         throw new Error(`${instance}: ${typeof answer.error === "string" ? answer.error : "error"}`);
       }
+      if (answer === 0) {
+        throw new Error(
+          `${instance} sent the message to nobody${user ? ` (receiver "${user}" unknown?)` : ""}`
+        );
+      }
     }
   }
   async updateImages(homescreen) {
@@ -971,8 +976,10 @@ class Blink extends utils.Adapter {
       const message2 = obj.message;
       try {
         await this.notify((0, import_battery_warner.batteryTestText)(await this.german()), message2 == null ? void 0 : message2.instance, message2 == null ? void 0 : message2.users);
+        this.log.info("Test message sent");
         return reply({ result: "OK" });
       } catch (err) {
+        this.log.warn(`Test message not sent: ${(0, import_errors.describeError)(err)}`);
         return reply({ error: (0, import_errors.describeError)(err) });
       }
     }

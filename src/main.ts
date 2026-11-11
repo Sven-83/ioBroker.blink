@@ -745,6 +745,12 @@ class Blink extends utils.Adapter {
             if (answer && typeof answer === 'object' && 'error' in answer && answer.error) {
                 throw new Error(`${instance}: ${typeof answer.error === 'string' ? answer.error : 'error'}`);
             }
+            // telegram answers with the number of messages sent: 0 means it knows no receiver
+            if (answer === 0) {
+                throw new Error(
+                    `${instance} sent the message to nobody${user ? ` (receiver "${user}" unknown?)` : ''}`,
+                );
+            }
         }
     }
 
@@ -1027,8 +1033,10 @@ class Blink extends utils.Adapter {
             const message = obj.message as { instance?: unknown; users?: unknown } | undefined;
             try {
                 await this.notify(batteryTestText(await this.german()), message?.instance, message?.users);
+                this.log.info('Test message sent');
                 return reply({ result: 'OK' });
             } catch (err) {
+                this.log.warn(`Test message not sent: ${describeError(err)}`);
                 return reply({ error: describeError(err) });
             }
         }

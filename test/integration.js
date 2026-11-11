@@ -890,6 +890,8 @@ tests.integration(path.join(__dirname, '..'), {
             const MESSENGER = 'system.adapter.fakemsg.0';
             /** @type {{ command: string, message: any }[]} */
             const received = [];
+            /** answer of the messenger: the number of messages sent, like telegram */
+            let sentCount = 1;
 
             before(async function () {
                 this.timeout(60_000);
@@ -905,7 +907,7 @@ tests.integration(path.join(__dirname, '..'), {
                     received.push({ command: msg.command, message: msg.message });
                     harness.dbConnection.pushMessage(msg.from, {
                         command: msg.command,
-                        message: 1,
+                        message: sentCount,
                         from: MESSENGER,
                         callback: { ...msg.callback, ack: true },
                     });
@@ -957,6 +959,16 @@ tests.integration(path.join(__dirname, '..'), {
                 const answer = await sendTo(harness, 'batteryTest', { instance: 'fakemsg.0', users: '' });
                 expect(answer).to.deep.equal({ result: 'OK' });
                 expect(received.at(-1).message).to.have.all.keys('text');
+                expect(harness.hasLog(/Test message sent/, 'info')).to.equal(true);
+            });
+
+            it('reports a messenger that sent the message to nobody', async function () {
+                this.timeout(20_000);
+                sentCount = 0;
+                const answer = await sendTo(harness, 'batteryTest', { instance: 'fakemsg.0', users: 'Nobody' });
+                sentCount = 1;
+                expect(answer.error).to.match(/sent the message to nobody \(receiver "Nobody" unknown\?\)/);
+                expect(harness.hasLog(/Test message not sent/, 'warn')).to.equal(true);
             });
 
             it('reports a messenger that is not running', async function () {
