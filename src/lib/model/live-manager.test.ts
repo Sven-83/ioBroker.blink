@@ -284,6 +284,15 @@ describe('model/live-manager', () => {
         expect((await use({ device: device({ serial: undefined }) }).manager.start(CAM)).result).to.equal('rejected');
     });
 
+    it('writes no result for a camera Blink does not report', async () => {
+        const unknown = use({ device: undefined });
+        expect((await unknown.manager.start(CAM)).result).to.equal('rejected');
+        expect(unknown.writes).to.deep.equal([]);
+        const disabled = use({ device: undefined, enabled: false });
+        expect((await disabled.manager.start(CAM)).result).to.equal('disabled');
+        expect(disabled.writes).to.deep.equal([]);
+    });
+
     it('reports a camera without a live image and tells Blink', async () => {
         const { manager, stops, spawned } = use({ start: { server: 'rtsps://x', token: 'T', commandId: 8 } });
         expect((await manager.start(CAM)).result).to.equal('unsupported');

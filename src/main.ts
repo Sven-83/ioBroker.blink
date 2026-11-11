@@ -280,7 +280,7 @@ class Blink extends utils.Adapter {
                     const infos = new Map<number, unknown>();
                     const states = await this.getStatesAsync('cameras.*.clipInfo');
                     for (const [id, state] of Object.entries(states ?? {})) {
-                        const match = id.match(/.cameras.(d+).clipInfo$/);
+                        const match = id.match(/\.cameras\.(\d+)\.clipInfo$/);
                         if (match) {
                             infos.set(Number(match[1]), state?.val);
                         }
@@ -389,6 +389,9 @@ class Blink extends utils.Adapter {
      */
     private schedule(ms: number, task: () => Promise<void>): void {
         this.clearTimeout(this.timer);
+        if (this.abort.signal.aborted) {
+            return;
+        }
         this.timer = this.setTimeout(() => {
             this.timer = undefined;
             task().catch((err: unknown) => {
@@ -555,7 +558,7 @@ class Blink extends utils.Adapter {
                 this.log.info('Motion clips can be read again');
             }
         } catch (err) {
-            if (err instanceof RateLimitedError || err instanceof SessionExpiredError || err instanceof AbortedError) {
+            if (err instanceof RateLimitedError || err instanceof SessionExpiredError || this.stopping(err)) {
                 throw err;
             }
             const message = `Motion clips not read: ${describeError(err)}`;
@@ -570,7 +573,7 @@ class Blink extends utils.Adapter {
             await this.clips?.sync();
             await this.clips?.expire(Date.now());
         } catch (err) {
-            if (err instanceof AbortedError) {
+            if (this.stopping(err)) {
                 throw err;
             }
             this.log.warn(`Clips not updated: ${describeError(err)}`);
@@ -670,7 +673,7 @@ class Blink extends utils.Adapter {
             await this.images!.sync(homescreen.devices);
             await this.images!.expire(Date.now());
         } catch (err) {
-            if (err instanceof AbortedError) {
+            if (this.stopping(err)) {
                 throw err;
             }
             this.log.warn(`Images not updated: ${describeError(err)}`);
@@ -871,7 +874,9 @@ class Blink extends utils.Adapter {
      * @param err - Caught error
      */
     private async handleFailure(err: unknown): Promise<void> {
-        if (err instanceof AbortedError) {
+        // shutting down: the database may already be closed, a failed request is no connection problem
+        if (this.stopping(err)) {
+            this.log.debug(`Stopped while busy: ${describeError(err)}`);
             return;
         }
         await this.setConnection(false);
@@ -911,6 +916,15 @@ class Blink extends utils.Adapter {
         this.log.warn(`Blink connection failed: ${describeError(err)}. Next attempt in ${this.retrySeconds} s`);
         this.schedule(this.retrySeconds * 1000, () => this.connect());
         this.retrySeconds = Math.min(this.retrySeconds * 2, RETRY_MAX_S);
+    }
+
+    /**
+     * The error comes from shutting down: requests were aborted or the database is already closed.
+     *
+     * @param err - Caught error
+     */
+    private stopping(err: unknown): boolean {
+        return err instanceof AbortedError || this.abort.signal.aborted;
     }
 
     /**

@@ -146,6 +146,9 @@ class LiveManager {
     }
   }
   async refuse(cameraId, result) {
+    if (!this.host.device(cameraId)) {
+      return { result };
+    }
     await this.tree.setValue(`cameras.${cameraId}.liveResult`, "");
     await this.tree.setValue(`cameras.${cameraId}.liveResult`, result);
     return { result };

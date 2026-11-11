@@ -801,6 +801,20 @@ tests.integration(path.join(__dirname, '..'), {
                     ...cloud.issuedTokens(),
                 ]);
             });
+
+            it('still deletes a stored clip after a restart when it is deleted at Blink', async function () {
+                this.timeout(30_000);
+                const entry = cloud.config.media.find(item => item.id === 5002);
+                entry.deleted = true;
+                entry.updated_at = at(0);
+                await restart(harness, { [ENV_KEY]: cloud.origin });
+                await waitFor(async () => (await stateVal(harness, 'cameras.3001.clip')) === '', 'clip of 3001 deleted');
+                expect(await stateVal(harness, 'cameras.3001.clipTime')).to.equal(0);
+                let error;
+                await harness.objects.readFile(NS, 'clips/3001.mp4').catch(err => (error = err));
+                expect(error, 'file deleted').to.be.an('error');
+                expect(await stateVal(harness, 'cameras.3002.clip'), 'other clip kept').to.match(/^\/blink\.0\/clips\//);
+            });
         });
 
         suite('Live image', getHarness => {
@@ -860,6 +874,8 @@ tests.integration(path.join(__dirname, '..'), {
                 this.timeout(10_000);
                 expect(await start('x')).to.deep.equal({ success: false, result: 'rejected' });
                 expect(await start(99_999)).to.deep.equal({ success: false, result: 'rejected' });
+                expect(await harness.states.getState(`${NS}.cameras.99999.liveResult`)).to.equal(null);
+                expect(harness.hasLog(/99999\.liveResult/, 'warn'), 'no state without object').to.equal(false);
             });
 
             it('ignores a stop for a camera without a live image', async function () {

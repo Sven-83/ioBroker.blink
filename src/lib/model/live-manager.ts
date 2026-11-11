@@ -259,6 +259,10 @@ export class LiveManager {
     }
 
     private async refuse(cameraId: number, result: LiveResult): Promise<LiveAccess> {
+        // a camera Blink does not report has no state to write to - the answer alone tells the client
+        if (!this.host.device(cameraId)) {
+            return { result };
+        }
         // emptied, so that the same result twice in a row is visible as a new result
         await this.tree.setValue(`cameras.${cameraId}.liveResult`, '');
         await this.tree.setValue(`cameras.${cameraId}.liveResult`, result);
