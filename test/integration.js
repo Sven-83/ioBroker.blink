@@ -246,9 +246,19 @@ tests.integration(path.join(__dirname, '..'), {
             it('uses the code once and removes it from the settings', async function () {
                 this.timeout(30_000);
                 await harness.changeAdapterConfig('blink', { native: { pin: cloud.pin } });
+                const instanceId = `system.adapter.${NS}`;
+                const storedPin = (await harness.objects.getObjectAsync(instanceId)).native.pin;
+                expect(storedPin, 'the code is stored encrypted').to.not.equal(cloud.pin);
                 await markStopped(harness);
                 await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
-                await waitFor(async () => (await harness.getAdapterConfig()).native.pin === '', 'pin removed');
+                // the adapter writes the emptied code encrypted; how depends on the js-controller version, so the
+                // test checks that the stored value changed and is no longer the code - not that it decrypts to ''
+                await waitFor(
+                    async () => (await harness.objects.getObjectAsync(instanceId)).native.pin !== storedPin,
+                    'pin removed',
+                );
+                expect((await harness.getAdapterConfig()).native.pin).to.not.equal(cloud.pin);
+                expect(harness.hasLog(/Removing the used 2FA code from the settings/, 'info')).to.equal(true);
                 expect(await stateVal(harness, 'auth.session')).to.not.equal('');
                 expect(cloud.stats.codesSent).to.equal(1);
                 expect(cloud.stats.verify).to.equal(1);
