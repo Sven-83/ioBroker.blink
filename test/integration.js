@@ -912,6 +912,12 @@ tests.integration(path.join(__dirname, '..'), {
                         callback: { ...msg.callback, ack: true },
                     });
                 });
+                // a serial number state as written by versions before 11.11.2026
+                await harness.objects.setObjectAsync(`${NS}.cameras.3001.serial`, {
+                    type: 'state',
+                    common: { name: 'Serial number', type: 'string', role: 'info.serial', read: true, write: false },
+                    native: {},
+                });
                 await harness.changeAdapterConfig('blink', {
                     native: {
                         email: cloud.email,
@@ -941,6 +947,12 @@ tests.integration(path.join(__dirname, '..'), {
                 expect(Object.keys(received[0].message)).to.have.members(['text', 'user']);
                 const stored = JSON.parse(await stateVal(harness, 'info.batteryWarnings'));
                 expect(Object.keys(stored)).to.deep.equal(['3003']);
+            });
+
+            it('removes serial number states of earlier versions and writes no new ones', async () => {
+                expect(await harness.objects.getObjectAsync(`${NS}.cameras.3001.serial`)).to.equal(null);
+                expect(await harness.objects.getObjectAsync(`${NS}.syncModules.2001.serial`)).to.equal(null);
+                expect(await harness.objects.getObjectAsync(`${NS}.cameras.3001.status`)).to.not.equal(null);
             });
 
             it('does not repeat the warning after a restart', async function () {

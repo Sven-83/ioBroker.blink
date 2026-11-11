@@ -78,7 +78,6 @@ const NETWORK_STATES: StateDef<BlinkNetwork>[] = [
 const SYNC_STATES: StateDef<BlinkSyncModule>[] = [
     ...common<BlinkSyncModule>(),
     { key: 'networkId', name: 'Network ID', type: 'number', role: 'info', get: item => item.networkId },
-    { key: 'serial', name: 'Serial number', type: 'string', role: 'info.serial', get: item => item.serial },
     { key: 'status', name: 'Status', type: 'string', role: 'info.status', get: item => item.status },
     {
         key: 'localStorageEnabled',
@@ -101,7 +100,6 @@ const DEVICE_STATES: StateDef<BlinkDevice>[] = [
     { key: 'kind', name: 'Device family', type: 'string', role: 'info', get: item => item.kind },
     { key: 'type', name: 'Model', type: 'string', role: 'info', get: item => item.type },
     { key: 'networkId', name: 'Network ID', type: 'number', role: 'info', get: item => item.networkId },
-    { key: 'serial', name: 'Serial number', type: 'string', role: 'info.serial', get: item => item.serial },
     { key: 'status', name: 'Status', type: 'string', role: 'info.status', get: item => item.status },
     {
         key: 'enabled',

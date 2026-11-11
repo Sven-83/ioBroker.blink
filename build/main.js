@@ -112,6 +112,7 @@ class Blink extends utils.Adapter {
       native: {}
     });
     await this.createControlObjects();
+    await this.removeSerialStates();
     if (this.config.batteryWarning) {
       await this.setObjectNotExistsAsync(import_battery_warner.BATTERY_STATE, {
         type: "state",
@@ -153,7 +154,7 @@ class Blink extends utils.Adapter {
     this.oauth = new import_oauth.OAuthFlow(http);
     this.rest = new import_rest.RestClient(http);
     this.tree = new import_tree.ObjectTree({
-      writeObject: (id, object) => this.extendObjectAsync(id, object),
+      writeObject: (id, object) => this.extendObject(id, object),
       writeState: (id, value) => this.setState(id, value, true),
       listDevices: async () => {
         const prefix = `${this.namespace}.`;
@@ -876,9 +877,21 @@ class Blink extends utils.Adapter {
     });
     this.selection.run(command, networks).catch(fail);
   }
+  /**
+   * Serial numbers were states until 11.11.2026. They are personal data (audit B.10.18) and only needed in
+   * memory for the live image, so the states of earlier versions are removed.
+   */
+  async removeSerialStates() {
+    for (const folder of ["syncModules", "cameras"]) {
+      const objects = await this.getForeignObjectsAsync(`${this.namespace}.${folder}.*.serial`, "state");
+      for (const id of Object.keys(objects != null ? objects : {})) {
+        await this.delForeignObjectAsync(id);
+      }
+    }
+  }
   /** Commands for several networks; created here, as instanceObjects do not reach existing instances */
   async createControlObjects() {
-    await this.extendObjectAsync("control", {
+    await this.extendObject("control", {
       type: "channel",
       common: { name: "Commands for several networks" },
       native: {}
@@ -888,7 +901,7 @@ class Blink extends utils.Adapter {
       [import_arm_selection.CONTROL_IDS.disarmAll, "Disarm all networks"]
     ];
     for (const [id, name] of buttons) {
-      await this.extendObjectAsync(id, {
+      await this.extendObject(id, {
         type: "state",
         common: { name, type: "boolean", role: "button", read: false, write: true },
         native: {}
@@ -1091,6 +1104,9 @@ class Blink extends utils.Adapter {
       (_a = this.live) == null ? void 0 : _a.shutdown();
       this.clearTimeout(this.timer);
       this.timer = void 0;
+      this.setState("info.connection", false, true).catch(
+        (err) => this.log.debug(`info.connection not reset: ${(0, import_errors.describeError)(err)}`)
+      );
     } finally {
       callback();
     }

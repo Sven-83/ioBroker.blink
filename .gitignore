@@ -20,8 +20,6 @@ admin/i18n/*/flat.txt
 *.log
 .env
 
-# widget build intermediate (result goes to widgets/)
-src-widgets/build/
 
 # coverage report (npm run coverage)
 coverage/

@@ -63,7 +63,7 @@
         "extIcon": "https://raw.githubusercontent.com/Sven-83/ioBroker.blink/main/admin/blink.png",
         "readme": "https://github.com/Sven-83/ioBroker.blink/blob/main/README.md",
         "loglevel": "info",
-        "tier": 3,
+        "tier": 2,
         "mode": "daemon",
         "type": "alarm",
         "compact": true,
@@ -110,10 +110,13 @@
         "notifyUsers": ""
     },
     "encryptedNative": [
-        "password"
+        "password",
+        "pin"
     ],
     "protectedNative": [
-        "password"
+        "email",
+        "password",
+        "pin"
     ],
     "objects": [],
     "instanceObjects": [

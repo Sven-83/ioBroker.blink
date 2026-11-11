@@ -147,6 +147,7 @@ class Blink extends utils.Adapter {
             native: {},
         });
         await this.createControlObjects();
+        await this.removeSerialStates();
         if (this.config.batteryWarning) {
             await this.setObjectNotExistsAsync(BATTERY_STATE, {
                 type: 'state',
@@ -186,7 +187,7 @@ class Blink extends utils.Adapter {
         this.oauth = new OAuthFlow(http);
         this.rest = new RestClient(http);
         this.tree = new ObjectTree({
-            writeObject: (id, object) => this.extendObjectAsync(id, object),
+            writeObject: (id, object) => this.extendObject(id, object),
             writeState: (id, value) => this.setState(id, value, true),
             listDevices: async () => {
                 const prefix = `${this.namespace}.`;
@@ -926,9 +927,22 @@ class Blink extends utils.Adapter {
         this.selection.run(command, networks).catch(fail);
     }
 
+    /**
+     * Serial numbers were states until 11.11.2026. They are personal data (audit B.10.18) and only needed in
+     * memory for the live image, so the states of earlier versions are removed.
+     */
+    private async removeSerialStates(): Promise<void> {
+        for (const folder of ['syncModules', 'cameras']) {
+            const objects = await this.getForeignObjectsAsync(`${this.namespace}.${folder}.*.serial`, 'state');
+            for (const id of Object.keys(objects ?? {})) {
+                await this.delForeignObjectAsync(id);
+            }
+        }
+    }
+
     /** Commands for several networks; created here, as instanceObjects do not reach existing instances */
     private async createControlObjects(): Promise<void> {
-        await this.extendObjectAsync('control', {
+        await this.extendObject('control', {
             type: 'channel',
             common: { name: 'Commands for several networks' },
             native: {},
@@ -938,7 +952,7 @@ class Blink extends utils.Adapter {
             [CONTROL_IDS.disarmAll, 'Disarm all networks'],
         ];
         for (const [id, name] of buttons) {
-            await this.extendObjectAsync(id, {
+            await this.extendObject(id, {
                 type: 'state',
                 common: { name, type: 'boolean', role: 'button', read: false, write: true },
                 native: {},
@@ -1157,6 +1171,10 @@ class Blink extends utils.Adapter {
             this.live?.shutdown();
             this.clearTimeout(this.timer);
             this.timer = undefined;
+            // not awaited: the callback must come in any case; the database may already be closing
+            this.setState('info.connection', false, true).catch((err: unknown) =>
+                this.log.debug(`info.connection not reset: ${describeError(err)}`),
+            );
         } finally {
             callback();
         }

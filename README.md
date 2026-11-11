@@ -3,35 +3,53 @@
 # ioBroker.blink
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Test and Release](https://github.com/Sven-83/ioBroker.blink/workflows/Test%20and%20Release/badge.svg)
 
-> **Work in progress:** complete rewrite in TypeScript. Login, arming, snapshots, live view and the camera page work; clips follow.
-> **In Arbeit:** komplette Neufassung in TypeScript. Login, Scharfschalten, Snapshots, Livebild und Kamera-Seite laufen; Clips folgen.
-
-[English](#english) | [Deutsch](#deutsch)
-
-## English
+German documentation: [docs/de/README.md](docs/de/README.md)
 
 ioBroker adapter for Blink cameras (Amazon). It uses the unofficial Blink cloud API, which can change without notice.
 
-### Planned features
-- Login with 2FA code in the instance settings
-- Arm/disarm with readback (the state is confirmed only after Blink reports it)
-- Snapshots stored in the adapter file storage
-- Live view (ffmpeg) - off by default, local access only, token required
-- Motion clips and smart detection (person, animal, vehicle, package)
+> **Not the npm package `iobroker.blink`.** That package is a different adapter by another author with the same
+> name and a different object structure. This adapter is a complete rewrite in TypeScript and is installed from
+> GitHub only (see Installation).
+
+### Features
+- Login with PKCE and 2FA code (instance settings or `sendTo`); the session is stored encrypted and renewed
+  automatically, without login loops
+- Arm/disarm per network with readback: the state is confirmed only after Blink reports it
+- "Arm selected networks" and "disarm all"
+- Motion detection on/off per camera with readback
+- Snapshots stored in the file storage of the instance, deleted after a retention period
+- Live image (ffmpeg, MJPEG) - off by default, local access only, random token per session
+- Time, source and detection of the last motion clip; the last clip of each camera is stored and can be played
+- Touch page for the web adapter with all cameras grouped by network
+- Optional battery warning through Telegram (text only)
+
+### Requirements
+- A Blink account (e-mail address and password); a Blink subscription for motion clips
+- js-controller 6.0.11 or newer, admin 7.6.20 or newer, Node.js 22 or newer
+- ffmpeg for the live image (`apt install ffmpeg` on Debian/Raspberry Pi OS)
+- The web adapter for the camera page, images and clips
 
 ### Installation
+The adapter is not listed in the ioBroker repositories, and the npm package of the same name is a different adapter.
+Install it from GitHub:
 ```bash
 iob url https://github.com/Sven-83/ioBroker.blink
 ```
-There are no npm releases; the adapter is installed from the `main` branch.
+or in Admin: *Adapters* → *Install from custom URL* → `https://github.com/Sven-83/ioBroker.blink`.
 
 ### Configuration
 | Setting | Meaning |
 |---|---|
-| E-mail address / password | Blink account (the password is stored encrypted) |
-| 2FA code | Only when Blink sends a code; it is used once and then deleted |
+| E-mail address / password | Blink account (both protected, the password is stored encrypted) |
+| 2FA code | Only when Blink sends a code; it is stored encrypted, used once and then deleted |
 | Polling interval | Seconds, 30 to 3600, default 60 |
+| Keep images for | Hours, 1 to 720, default 24. Images and clips are deleted after this time |
+| Allow live image | Off by default. Needs ffmpeg; a live image keeps a battery camera awake |
+| Address / port of the live image | Default `127.0.0.1:8766` (this computer only). Enter the address of this computer for displays in your network |
+| Time limit of a live image | Seconds, 30 to 600, default 120 |
+| Path of ffmpeg | Empty: searched in the usual places; otherwise the absolute path of a program called ffmpeg |
 | Battery warning | Off by default. Sends one text message per camera through a Telegram instance (default `telegram.0`) when Blink reports a low battery; again only after the battery was fine and at least a day later. No images. The button sends a test message |
 | Receivers | Telegram user names separated by commas; empty: all users of the instance |
 
@@ -42,96 +60,68 @@ There are no npm releases; the adapter is installed from the `main` branch.
    - send it from a script: `sendTo('blink.0', 'verifyPin', { pin: '123456' }, res => log(JSON.stringify(res)));`
 3. Restarts do not request a new code while the login is waiting. The session is stored encrypted and renewed automatically.
 
+### States
 | State | Meaning |
 |---|---|
 | `info.connection` | Logged in to the Blink cloud |
 | `info.loginState` | `ok`, `connecting`, `twoFactorRequired`, `twoFactorRejected`, `credentialsRejected` (no further attempts until the settings change), `rateLimited`, `error` (retry with backoff), `noConfig` |
+| `info.lastPoll` | Time of the last successful poll |
+| `info.batteryWarnings` | Battery warnings sent (internal, only with the battery warning on) |
 | `auth.*` | Session, pending login and device ID - encrypted, do not edit |
-
-### Control
-| State | Meaning |
-|---|---|
 | `networks.<id>.armed` | Arm (`true`) or disarm (`false`); ack only after Blink reports the new state |
+| `networks.<id>.armPending` / `armResult` | Command running / result: `confirmed`, `rejected`, `unconfirmed` |
 | `networks.<id>.armWithAll` | The network is armed by `control.armSelected`. A setting: kept until you change it |
 | `control.armSelected` | Button: arms the selected networks |
 | `control.disarmAll` | Button: disarms all networks |
-| `cameras.<id>.enabled` | Motion detection on/off; ack only after Blink reports it |
-| `cameras.<id>.snapshot` | Button: new image, stored in the file storage (`cameras.<id>.image`) |
+| `syncModules.<id>.*` | Name, network, status, local storage of the Sync Modules |
+| `cameras.<id>.enabled` | Motion detection on/off; ack only after Blink reports it (`motionPending`, `motionResult`) |
+| `cameras.<id>.available` | `false` if Blink no longer reports the device; devices are never deleted automatically |
+| `cameras.<id>.batteryLow` / `batteryLevel` / `batteryVoltage` | Battery as reported by Blink (not every model reports every value) |
+| `cameras.<id>.temperature` / `wifi` / `lfr` | Temperature, Wi-Fi bars, signal bars to the Sync Module |
+| `cameras.<id>.snapshot` | Button: new image (`snapshotPending`, `snapshotResult`) |
+| `cameras.<id>.image` / `imageTime` | Address of the last image in the file storage (with `?t=` so browsers reload it) / its time |
+| `cameras.<id>.motionTime` / `motionSource` / `motionDetection` | Last motion clip: time, source (`pir`, `cv_motion`), detection (`person`, `animal`, `vehicle`, `package`, empty) |
+| `cameras.<id>.clip` / `clipTime` | Address of the stored last clip (MP4) / its time; empty when deleted at Blink or after the retention period |
+| `cameras.<id>.liveActive` / `liveResult` | Live image running / state of the last request |
+
+`cameras` contains cameras, Minis and doorbells; values a model does not report are not created.
+
+### Live image
+The live image is started with `sendTo('blink.0', 'liveStart', { cameraId })`. The answer contains the port and the
+path with a random token for this session (never in a state or the log); `liveStop` ends it. One session at a time;
+it ends after the time limit, 20 s without a viewer or 30 s without a first image. The camera page uses this.
 
 ### Camera page
 The web adapter serves a touch page at `http://<host>:<web port>/blink/index.html`: all cameras grouped by network,
-images with their age, arm/disarm, motion detection, new image and live view.
+images with their age, arm/disarm, motion detection, new image, live image and the last clip.
 - `?view=all` (default) shows all networks on one page, `?view=tabs` one network per tab.
 - `?pin=0_userdata.0.<path>` lets disarming ask for a PIN that a script checks: the page writes `kameras:<network id>`
   to `<path>.pinZiel` and the entry to `<path>.pinEingabe` and shows `<path>.meldung`.
-- The live view needs the live image switched on in the settings and an address the browser can reach (not
+- The live image needs the live image switched on in the settings and an address the browser can reach (not
   `127.0.0.1`); it only works when the page is opened via http.
 
 ### Security
-Cameras show private areas. Only make ioBroker admin and web reachable with authentication and HTTPS.
+Cameras show private areas, and arming controls a security system. Only make ioBroker admin and web reachable with
+authentication and HTTPS. Images and clips are personal data: they stay in the file storage of the instance and are
+deleted after the retention period; only the optional battery warning sends text to Telegram.
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-## Deutsch
+### Known limitations
+- The Blink API is unofficial and may change at any time.
+- The live image has about 2 s delay and about 10 images per second without sound; it can stutter.
+- Smart detection (person, animal, ...) depends on the Blink subscription and the camera model.
+- The homescreen of Blink often has no battery voltage; `batteryLow` is the reliable value.
+- Only the last clip per camera is kept; there is no archive. Local storage on the Sync Module is not used.
+- Doorbells are implemented from the API but not tested on a real device.
 
-ioBroker-Adapter für Blink-Kameras (Amazon). Er nutzt die inoffizielle Blink-Cloud-API, die sich ohne Ankündigung ändern kann.
+## Credits
+Knowledge of the login flow, the homescreen fields and the live stream packets comes from community clients, in
+particular [Pischleuder1/ioBroker.blink](https://github.com/Pischleuder1/ioBroker.blink) (MIT). The files that use it
+name it in their header; its copyright notice is in [LICENSE](LICENSE).
 
-### Geplante Funktionen
-- Login mit 2FA-Code in den Instanz-Einstellungen
-- Scharf/Unscharf mit Rückmeldung (der Zustand wird erst bestätigt, wenn Blink ihn meldet)
-- Snapshots im Dateispeicher des Adapters
-- Livebild (ffmpeg) - standardmäßig aus, nur lokal erreichbar, mit Token
-- Bewegungs-Clips und Erkennung (Person, Tier, Fahrzeug, Paket)
-
-### Installation
-```bash
-iob url https://github.com/Sven-83/ioBroker.blink
-```
-Es gibt keine npm-Releases; installiert wird aus dem Branch `main`.
-
-### Einstellungen
-| Einstellung | Bedeutung |
-|---|---|
-| E-Mail-Adresse / Passwort | Blink-Konto (das Passwort wird verschlüsselt gespeichert) |
-| 2FA-Code | Nur wenn Blink einen Code schickt; er wird einmal verwendet und dann gelöscht |
-| Abfrageintervall | Sekunden, 30 bis 3600, Standard 60 |
-| Batteriewarnung | Standardmäßig aus. Schickt je Kamera eine Textnachricht über eine Telegram-Instanz (Standard `telegram.0`), wenn Blink eine schwache Batterie meldet; erneut erst, wenn sie zwischendurch wieder gut war, und frühestens nach einem Tag. Keine Bilder. Der Knopf schickt eine Testnachricht |
-| Empfänger | Telegram-Benutzernamen, durch Komma getrennt; leer: alle Benutzer der Instanz |
-
-### Login und 2FA
-1. E-Mail-Adresse und Passwort eintragen und speichern. Der Adapter meldet sich an.
-2. Schickt Blink einen Code (SMS oder E-Mail), zeigt `info.loginState` den Wert `twoFactorRequired`. Innerhalb von 10 Minuten entweder
-   - den Code in den Einstellungen (2FA-Code) eintragen und speichern, oder
-   - ihn aus einem Skript senden: `sendTo('blink.0', 'verifyPin', { pin: '123456' }, res => log(JSON.stringify(res)));`
-3. Neustarts fordern keinen neuen Code an, solange der Login wartet. Die Sitzung wird verschlüsselt gespeichert und automatisch erneuert.
-
-| Datenpunkt | Bedeutung |
-|---|---|
-| `info.connection` | Mit der Blink-Cloud verbunden |
-| `info.loginState` | `ok`, `connecting`, `twoFactorRequired`, `twoFactorRejected`, `credentialsRejected` (keine weiteren Versuche, bis die Einstellungen geändert werden), `rateLimited`, `error` (neuer Versuch mit Backoff), `noConfig` |
-| `auth.*` | Sitzung, wartender Login und Geräte-ID - verschlüsselt, nicht ändern |
-
-### Steuerung
-| Datenpunkt | Bedeutung |
-|---|---|
-| `networks.<id>.armed` | Scharf (`true`) oder unscharf (`false`); ack erst, wenn Blink den neuen Zustand meldet |
-| `networks.<id>.armWithAll` | Das Netzwerk wird von `control.armSelected` scharf geschaltet. Eine Einstellung: bleibt, bis du sie änderst |
-| `control.armSelected` | Taster: schaltet die ausgewählten Netzwerke scharf |
-| `control.disarmAll` | Taster: schaltet alle Netzwerke unscharf |
-| `cameras.<id>.enabled` | Bewegungserkennung an/aus; ack erst, wenn Blink es meldet |
-| `cameras.<id>.snapshot` | Taster: neues Bild, gespeichert im Dateispeicher (`cameras.<id>.image`) |
-
-### Kamera-Seite
-Der Web-Adapter liefert eine Touch-Seite unter `http://<host>:<web-port>/blink/index.html`: alle Kameras nach Netzwerk,
-Bilder mit Alter, Scharf/Unscharf, Bewegungserkennung, neues Bild und Livebild.
-- `?view=all` (Standard) zeigt alle Netzwerke auf einer Seite, `?view=tabs` ein Netzwerk je Reiter.
-- `?pin=0_userdata.0.<pfad>` lässt das Unscharfschalten eine PIN abfragen, die ein Skript prüft: Die Seite schreibt
-  `kameras:<Netzwerk-ID>` nach `<pfad>.pinZiel`, die Eingabe nach `<pfad>.pinEingabe` und zeigt `<pfad>.meldung`.
-- Das Livebild braucht das eingeschaltete Livebild in den Einstellungen und eine Adresse, die der Browser erreicht
-  (nicht `127.0.0.1`); es geht nur, wenn die Seite über http geöffnet ist.
-
-### Sicherheit
-Kameras zeigen private Bereiche. ioBroker-Admin und -Web nur mit Anmeldung und HTTPS erreichbar machen.
-Schwachstellen bitte wie in [SECURITY.md](SECURITY.md) beschrieben melden.
+## Disclaimer
+This project is not affiliated with, endorsed by or connected to Amazon or Blink. Blink is a trademark of its owners.
+Use at your own risk.
 
 ## Changelog
 <!--
@@ -146,6 +136,7 @@ Schwachstellen bitte wie in [SECURITY.md](SECURITY.md) beschrieben melden.
 - Camera page for the web adapter (overview of all networks or tabs, optional PIN for disarming)
 - Motion time, detection and the last clip per camera, playable on the camera page
 - Optional battery warning through Telegram (text only)
+- Serial numbers are no longer stored as states; the 2FA code is stored encrypted
 
 ## License
 MIT License

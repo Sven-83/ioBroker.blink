@@ -16,6 +16,9 @@ updates:
       # @types/node follows the minimum supported Node.js version, not the latest
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # TypeScript 7 does not fit typescript-eslint yet (peer range <6.1.0)
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
