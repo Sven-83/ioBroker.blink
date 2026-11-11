@@ -25,6 +25,7 @@ __export(config_exports, {
   LIVE_MAX_MAX_S: () => LIVE_MAX_MAX_S,
   LIVE_MAX_MIN_S: () => LIVE_MAX_MIN_S,
   LIVE_PORT_DEFAULT: () => LIVE_PORT_DEFAULT,
+  NOTIFY_INSTANCE_DEFAULT: () => NOTIFY_INSTANCE_DEFAULT,
   POLL_DEFAULT_S: () => POLL_DEFAULT_S,
   POLL_JITTER_MS: () => POLL_JITTER_MS,
   POLL_MAX_S: () => POLL_MAX_S,
@@ -37,6 +38,8 @@ __export(config_exports, {
   livePort: () => livePort,
   normalizeEmail: () => normalizeEmail,
   normalizePin: () => normalizePin,
+  notifyInstance: () => notifyInstance,
+  notifyUsers: () => notifyUsers,
   pollDelayMs: () => pollDelayMs,
   pollIntervalSeconds: () => pollIntervalSeconds,
   testOrigin: () => testOrigin
@@ -90,6 +93,22 @@ function ffmpegCommand(value) {
   }
   return (0, import_node_path.isAbsolute)(path) && /^ffmpeg(\.exe)?$/i.test((0, import_node_path.basename)(path)) ? path : void 0;
 }
+const NOTIFY_INSTANCE_DEFAULT = "telegram.0";
+function notifyInstance(value) {
+  const instance = typeof value === "string" ? value.trim() : "";
+  if (!instance) {
+    return NOTIFY_INSTANCE_DEFAULT;
+  }
+  return /^[a-z0-9][a-z0-9_-]*\.\d{1,3}$/.test(instance) ? instance : void 0;
+}
+function notifyUsers(value) {
+  const text = typeof value === "string" ? value : "";
+  return [
+    ...new Set(
+      text.split(",").map((user) => user.trim()).filter(Boolean)
+    )
+  ].slice(0, 10);
+}
 const POLL_JITTER_MS = 5e3;
 function pollDelayMs(seconds, random = Math.random) {
   return seconds * 1e3 + Math.floor(random() * POLL_JITTER_MS);
@@ -115,6 +134,7 @@ function testOrigin(value) {
   LIVE_MAX_MAX_S,
   LIVE_MAX_MIN_S,
   LIVE_PORT_DEFAULT,
+  NOTIFY_INSTANCE_DEFAULT,
   POLL_DEFAULT_S,
   POLL_JITTER_MS,
   POLL_MAX_S,
@@ -127,6 +147,8 @@ function testOrigin(value) {
   livePort,
   normalizeEmail,
   normalizePin,
+  notifyInstance,
+  notifyUsers,
   pollDelayMs,
   pollIntervalSeconds,
   testOrigin

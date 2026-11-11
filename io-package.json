@@ -104,7 +104,10 @@
         "liveBind": "127.0.0.1",
         "livePort": 8766,
         "liveMaxSeconds": 120,
-        "ffmpegPath": ""
+        "ffmpegPath": "",
+        "batteryWarning": false,
+        "notifyInstance": "telegram.0",
+        "notifyUsers": ""
     },
     "encryptedNative": [
         "password"

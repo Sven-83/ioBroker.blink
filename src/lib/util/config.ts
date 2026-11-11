@@ -98,6 +98,40 @@ export function ffmpegCommand(value: unknown): string | undefined {
     return isAbsolute(path) && /^ffmpeg(\.exe)?$/i.test(basename(path)) ? path : undefined;
 }
 
+/** Instance that sends the battery warning */
+export const NOTIFY_INSTANCE_DEFAULT = 'telegram.0';
+
+/**
+ * Instance that sends messages, like telegram.0. Empty means the default.
+ *
+ * @param value - Value from the instance config
+ * @returns The instance, undefined if the value is not an instance name
+ */
+export function notifyInstance(value: unknown): string | undefined {
+    const instance = typeof value === 'string' ? value.trim() : '';
+    if (!instance) {
+        return NOTIFY_INSTANCE_DEFAULT;
+    }
+    return /^[a-z0-9][a-z0-9_-]*\.\d{1,3}$/.test(instance) ? instance : undefined;
+}
+
+/**
+ * Receivers of messages, separated by commas. Empty: the instance sends to all of its users.
+ *
+ * @param value - Value from the instance config
+ */
+export function notifyUsers(value: unknown): string[] {
+    const text = typeof value === 'string' ? value : '';
+    return [
+        ...new Set(
+            text
+                .split(',')
+                .map(user => user.trim())
+                .filter(Boolean),
+        ),
+    ].slice(0, 10);
+}
+
 /** Largest random addition to the polling interval (audit B.11.1) */
 export const POLL_JITTER_MS = 5_000;
 

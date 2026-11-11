@@ -23,5 +23,12 @@
     "Polling": "Abfrage",
     "Polling interval": "Abfrageintervall",
     "Seconds, minimum 30": "Sekunden, mindestens 30",
-    "Two-factor authentication": "Zwei-Faktor-Authentifizierung"
+    "Two-factor authentication": "Zwei-Faktor-Authentifizierung",
+    "Battery warning": "Batteriewarnung",
+    "Warn when a battery is low": "Warnen, wenn eine Batterie schwach ist",
+    "Sends one message per camera when Blink reports a low battery. Text only, no images.": "Schickt je Kamera eine Nachricht, wenn Blink eine schwache Batterie meldet. Nur Text, keine Bilder.",
+    "Telegram instance": "Telegram-Instanz",
+    "Receivers": "Empfänger",
+    "Telegram user names, separated by commas. Empty: all users of the instance.": "Telegram-Benutzernamen, durch Komma getrennt. Leer: alle Benutzer der Instanz.",
+    "Send a test message": "Testnachricht senden"
 }

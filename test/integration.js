@@ -884,6 +884,90 @@ tests.integration(path.join(__dirname, '..'), {
             });
         });
 
+        suite('Battery warning', getHarness => {
+            let harness;
+            let cloud;
+            const MESSENGER = 'system.adapter.fakemsg.0';
+            /** @type {{ command: string, message: any }[]} */
+            const received = [];
+
+            before(async function () {
+                this.timeout(60_000);
+                harness = getHarness();
+                cloud = await startFakeBlink();
+                // a messenger instance like telegram.0 that answers every message
+                await harness.states.setState(`${MESSENGER}.alive`, { val: true, ack: true });
+                harness.dbConnection.subscribeMessage(MESSENGER);
+                harness.on('stateChange', (id, msg) => {
+                    if (id !== `messagebox.${MESSENGER}` || !msg?.callback) {
+                        return;
+                    }
+                    received.push({ command: msg.command, message: msg.message });
+                    harness.dbConnection.pushMessage(msg.from, {
+                        command: msg.command,
+                        message: 1,
+                        from: MESSENGER,
+                        callback: { ...msg.callback, ack: true },
+                    });
+                });
+                await harness.changeAdapterConfig('blink', {
+                    native: {
+                        email: cloud.email,
+                        password: cloud.password,
+                        pin: '',
+                        pollInterval: 3600,
+                        batteryWarning: true,
+                        notifyInstance: 'fakemsg.0',
+                        notifyUsers: 'Anna',
+                    },
+                });
+                await harness.startAdapterAndWait(false, { [ENV_KEY]: cloud.origin });
+                await harness.enableSendTo();
+                await waitFor(async () => received.length > 0, 'battery warning');
+            });
+
+            after(async () => {
+                await cloud?.close();
+            });
+
+            it('sends one text message for the device with a low battery', async () => {
+                expect(received).to.have.length(1);
+                expect(received[0].command).to.equal('send');
+                expect(received[0].message.user).to.equal('Anna');
+                expect(received[0].message.text).to.match(/Test Doorbell/);
+                expect(received[0].message.text).not.to.match(/Test Camera|Test Mini/);
+                expect(Object.keys(received[0].message)).to.have.members(['text', 'user']);
+                const stored = JSON.parse(await stateVal(harness, 'info.batteryWarnings'));
+                expect(Object.keys(stored)).to.deep.equal(['3003']);
+            });
+
+            it('does not repeat the warning after a restart', async function () {
+                this.timeout(30_000);
+                const before = await stateVal(harness, 'info.lastPoll');
+                await restart(harness, { [ENV_KEY]: cloud.origin });
+                await harness.enableSendTo();
+                await waitFor(async () => (await stateVal(harness, 'info.lastPoll')) > before, 'polled after restart');
+                // the warning is checked right after the poll; give it a moment to show up if it were sent
+                await new Promise(resolve => setTimeout(resolve, 1_000));
+                expect(received).to.have.length(1);
+            });
+
+            it('sends a test message with the values of the form', async function () {
+                this.timeout(20_000);
+                const answer = await sendTo(harness, 'batteryTest', { instance: 'fakemsg.0', users: '' });
+                expect(answer).to.deep.equal({ result: 'OK' });
+                expect(received.at(-1).message).to.have.all.keys('text');
+            });
+
+            it('reports a messenger that is not running', async function () {
+                this.timeout(20_000);
+                const answer = await sendTo(harness, 'batteryTest', { instance: 'telegram.0', users: '' });
+                expect(answer.error).to.match(/telegram\.0 is not running/);
+                const invalid = await sendTo(harness, 'batteryTest', { instance: 'x', users: '' });
+                expect(invalid.error).to.match(/not valid/);
+            });
+        });
+
         suite('Wrong password', getHarness => {
             let harness;
             let cloud;

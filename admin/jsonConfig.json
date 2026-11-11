@@ -152,6 +152,60 @@
             "md": 6,
             "lg": 4,
             "xl": 4
+        },
+        "_headerBattery": {
+            "type": "header",
+            "text": "Battery warning",
+            "size": 2,
+            "newLine": true
+        },
+        "batteryWarning": {
+            "type": "checkbox",
+            "label": "Warn when a battery is low",
+            "help": "Sends one message per camera when Blink reports a low battery. Text only, no images.",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "notifyInstance": {
+            "type": "instance",
+            "adapter": "telegram",
+            "label": "Telegram instance",
+            "hidden": "!data.batteryWarning",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "notifyUsers": {
+            "type": "text",
+            "label": "Receivers",
+            "help": "Telegram user names, separated by commas. Empty: all users of the instance.",
+            "hidden": "!data.batteryWarning",
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "_batteryTest": {
+            "type": "sendTo",
+            "command": "batteryTest",
+            "label": "Send a test message",
+            "jsonData": "{\"instance\":\"${data.notifyInstance}\",\"users\":\"${data.notifyUsers}\"}",
+            "showProcess": true,
+            "hidden": "!data.batteryWarning",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
         }
     }
 }

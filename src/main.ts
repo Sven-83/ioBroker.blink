@@ -37,6 +37,7 @@ import {
 } from './lib/model/session-store';
 import { ArmQueue, MOTION_SWITCH } from './lib/model/arm-queue';
 import { ArmSelection, CONTROL_IDS, SELECTION_KEY } from './lib/model/arm-selection';
+import { BATTERY_STATE, BatteryWarner, batteryTestText } from './lib/model/battery-warner';
 import { ClipStore } from './lib/model/clip-store';
 import { ImageStore } from './lib/model/image-store';
 import { LiveManager } from './lib/model/live-manager';
@@ -52,6 +53,8 @@ import {
     livePort,
     normalizeEmail,
     normalizePin,
+    notifyInstance,
+    notifyUsers,
     pollDelayMs,
     pollIntervalSeconds,
     testOrigin,
@@ -60,6 +63,8 @@ import {
 /** First retry after a failed login, doubled up to RETRY_MAX_S (audit B.11.4) */
 const RETRY_START_S = 60;
 const RETRY_MAX_S = 1800;
+/** Longest wait for the messenger instance to answer */
+const NOTIFY_TIMEOUT_MS = 15_000;
 /** Random start delay, so many instances restarting together do not hit the cloud at once (audit B.11.1) */
 const START_JITTER_MS = 2_000;
 /** The access token is renewed this long before it expires */
@@ -85,6 +90,7 @@ class Blink extends utils.Adapter {
     private selection: ArmSelection | undefined;
     private images: ImageStore | undefined;
     private clips: ClipStore | undefined;
+    private battery: BatteryWarner | undefined;
     private snapshots: SnapshotQueue | undefined;
     private live: LiveManager | undefined;
     private homescreen: Homescreen | undefined;
@@ -141,6 +147,32 @@ class Blink extends utils.Adapter {
             native: {},
         });
         await this.createControlObjects();
+        if (this.config.batteryWarning) {
+            await this.setObjectNotExistsAsync(BATTERY_STATE, {
+                type: 'state',
+                common: {
+                    name: 'Battery warnings sent (internal)',
+                    type: 'string',
+                    role: 'json',
+                    read: true,
+                    write: false,
+                },
+                native: {},
+            });
+            const instance = this.config.notifyInstance;
+            const users = this.config.notifyUsers;
+            this.battery = new BatteryWarner(
+                {
+                    send: text => this.notify(text, instance, users),
+                    read: async () => (await this.getStateAsync(BATTERY_STATE))?.val,
+                    write: value => this.setState(BATTERY_STATE, value, true),
+                    debug: message => this.log.debug(message),
+                    info: message => this.log.info(message),
+                    warn: message => this.log.warn(message),
+                },
+                await this.german(),
+            );
+        }
 
         const origin = testOrigin(process.env[TEST_ORIGIN_ENV]);
         if (origin) {
@@ -538,6 +570,7 @@ class Blink extends utils.Adapter {
                 `Poll took ${Date.now() - started} ms: ${homescreen.networks.length} networks, ` +
                     `${homescreen.syncModules.length} Sync Modules, ${homescreen.devices.length} devices`,
             );
+            await this.updateBattery(homescreen);
             await this.updateImages(homescreen);
             await this.updateMotion();
             this.schedule(pollDelayMs(this.pollSeconds), () => this.poll());
@@ -668,6 +701,53 @@ class Blink extends utils.Adapter {
      *
      * @param homescreen - Current homescreen
      */
+    private async updateBattery(homescreen: Homescreen): Promise<void> {
+        try {
+            await this.battery?.check(homescreen);
+        } catch (err) {
+            if (this.stopping(err)) {
+                throw err;
+            }
+            this.log.warn(`Battery warning not checked: ${describeError(err)}`);
+        }
+    }
+
+    /** The messages are written in German if the system language is German */
+    private async german(): Promise<boolean> {
+        try {
+            const config = await this.getForeignObjectAsync('system.config');
+            return config?.common?.language === 'de';
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Sends a message through a messenger instance (telegram.0 by default). Only text, no images (audit B.10.22).
+     *
+     * @param text - Message
+     * @param instanceValue - Instance from the config
+     * @param usersValue - Receivers from the config, empty for all
+     */
+    private async notify(text: string, instanceValue: unknown, usersValue: unknown): Promise<void> {
+        const instance = notifyInstance(instanceValue);
+        if (!instance) {
+            throw new Error('the instance for messages is not valid (example: telegram.0)');
+        }
+        if (!(await this.getForeignStateAsync(`system.adapter.${instance}.alive`))?.val) {
+            throw new Error(`${instance} is not running`);
+        }
+        const users = notifyUsers(usersValue);
+        for (const user of users.length > 0 ? users : [undefined]) {
+            const answer: unknown = await this.sendToAsync(instance, 'send', user ? { text, user } : { text }, {
+                timeout: NOTIFY_TIMEOUT_MS,
+            });
+            if (answer && typeof answer === 'object' && 'error' in answer && answer.error) {
+                throw new Error(`${instance}: ${typeof answer.error === 'string' ? answer.error : 'error'}`);
+            }
+        }
+    }
+
     private async updateImages(homescreen: Homescreen): Promise<void> {
         try {
             await this.images!.sync(homescreen.devices);
@@ -941,6 +1021,16 @@ class Blink extends utils.Adapter {
         if (obj?.command === 'liveStart' || obj?.command === 'liveStop') {
             await this.onLiveMessage(obj, reply);
             return;
+        }
+        if (obj?.command === 'batteryTest') {
+            // from the instance settings: uses the values in the form, also before they are saved
+            const message = obj.message as { instance?: unknown; users?: unknown } | undefined;
+            try {
+                await this.notify(batteryTestText(await this.german()), message?.instance, message?.users);
+                return reply({ result: 'OK' });
+            } catch (err) {
+                return reply({ error: describeError(err) });
+            }
         }
         if (obj?.command !== 'verifyPin') {
             return;

@@ -32,6 +32,8 @@ There are no npm releases; the adapter is installed from the `main` branch.
 | E-mail address / password | Blink account (the password is stored encrypted) |
 | 2FA code | Only when Blink sends a code; it is used once and then deleted |
 | Polling interval | Seconds, 30 to 3600, default 60 |
+| Battery warning | Off by default. Sends one text message per camera through a Telegram instance (default `telegram.0`) when Blink reports a low battery; again only after the battery was fine and at least a day later. No images. The button sends a test message |
+| Receivers | Telegram user names separated by commas; empty: all users of the instance |
 
 ### Login and 2FA
 1. Enter e-mail address and password and save. The adapter logs in.
@@ -92,6 +94,8 @@ Es gibt keine npm-Releases; installiert wird aus dem Branch `main`.
 | E-Mail-Adresse / Passwort | Blink-Konto (das Passwort wird verschlüsselt gespeichert) |
 | 2FA-Code | Nur wenn Blink einen Code schickt; er wird einmal verwendet und dann gelöscht |
 | Abfrageintervall | Sekunden, 30 bis 3600, Standard 60 |
+| Batteriewarnung | Standardmäßig aus. Schickt je Kamera eine Textnachricht über eine Telegram-Instanz (Standard `telegram.0`), wenn Blink eine schwache Batterie meldet; erneut erst, wenn sie zwischendurch wieder gut war, und frühestens nach einem Tag. Keine Bilder. Der Knopf schickt eine Testnachricht |
+| Empfänger | Telegram-Benutzernamen, durch Komma getrennt; leer: alle Benutzer der Instanz |
 
 ### Login und 2FA
 1. E-Mail-Adresse und Passwort eintragen und speichern. Der Adapter meldet sich an.
@@ -140,6 +144,8 @@ Schwachstellen bitte wie in [SECURITY.md](SECURITY.md) beschrieben melden.
 - Arm/disarm with readback, snapshots, live view (pinned certificate of the stream servers)
 - Arm selected networks / disarm all, motion detection per camera with readback
 - Camera page for the web adapter (overview of all networks or tabs, optional PIN for disarming)
+- Motion time, detection and the last clip per camera, playable on the camera page
+- Optional battery warning through Telegram (text only)
 
 ## License
 MIT License

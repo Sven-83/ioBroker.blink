@@ -36,6 +36,7 @@ var import_rest = require("./lib/api/rest");
 var import_session_store = require("./lib/model/session-store");
 var import_arm_queue = require("./lib/model/arm-queue");
 var import_arm_selection = require("./lib/model/arm-selection");
+var import_battery_warner = require("./lib/model/battery-warner");
 var import_clip_store = require("./lib/model/clip-store");
 var import_image_store = require("./lib/model/image-store");
 var import_live_manager = require("./lib/model/live-manager");
@@ -45,6 +46,7 @@ var import_tree = require("./lib/model/tree");
 var import_config = require("./lib/util/config");
 const RETRY_START_S = 60;
 const RETRY_MAX_S = 1800;
+const NOTIFY_TIMEOUT_MS = 15e3;
 const START_JITTER_MS = 2e3;
 const REFRESH_MARGIN_MS = 5 * 6e4;
 class Blink extends utils.Adapter {
@@ -57,6 +59,7 @@ class Blink extends utils.Adapter {
   selection;
   images;
   clips;
+  battery;
   snapshots;
   live;
   homescreen;
@@ -109,6 +112,35 @@ class Blink extends utils.Adapter {
       native: {}
     });
     await this.createControlObjects();
+    if (this.config.batteryWarning) {
+      await this.setObjectNotExistsAsync(import_battery_warner.BATTERY_STATE, {
+        type: "state",
+        common: {
+          name: "Battery warnings sent (internal)",
+          type: "string",
+          role: "json",
+          read: true,
+          write: false
+        },
+        native: {}
+      });
+      const instance = this.config.notifyInstance;
+      const users = this.config.notifyUsers;
+      this.battery = new import_battery_warner.BatteryWarner(
+        {
+          send: (text) => this.notify(text, instance, users),
+          read: async () => {
+            var _a;
+            return (_a = await this.getStateAsync(import_battery_warner.BATTERY_STATE)) == null ? void 0 : _a.val;
+          },
+          write: (value) => this.setState(import_battery_warner.BATTERY_STATE, value, true),
+          debug: (message) => this.log.debug(message),
+          info: (message) => this.log.info(message),
+          warn: (message) => this.log.warn(message)
+        },
+        await this.german()
+      );
+    }
     const origin = (0, import_config.testOrigin)(process.env[import_config.TEST_ORIGIN_ENV]);
     if (origin) {
       this.log.warn(`Test mode: all requests go to ${origin}`);
@@ -501,6 +533,7 @@ class Blink extends utils.Adapter {
       this.log.debug(
         `Poll took ${Date.now() - started} ms: ${homescreen.networks.length} networks, ${homescreen.syncModules.length} Sync Modules, ${homescreen.devices.length} devices`
       );
+      await this.updateBattery(homescreen);
       await this.updateImages(homescreen);
       await this.updateMotion();
       this.schedule((0, import_config.pollDelayMs)(this.pollSeconds), () => this.poll());
@@ -623,6 +656,53 @@ class Blink extends utils.Adapter {
    *
    * @param homescreen - Current homescreen
    */
+  async updateBattery(homescreen) {
+    var _a;
+    try {
+      await ((_a = this.battery) == null ? void 0 : _a.check(homescreen));
+    } catch (err) {
+      if (this.stopping(err)) {
+        throw err;
+      }
+      this.log.warn(`Battery warning not checked: ${(0, import_errors.describeError)(err)}`);
+    }
+  }
+  /** The messages are written in German if the system language is German */
+  async german() {
+    var _a;
+    try {
+      const config = await this.getForeignObjectAsync("system.config");
+      return ((_a = config == null ? void 0 : config.common) == null ? void 0 : _a.language) === "de";
+    } catch {
+      return false;
+    }
+  }
+  /**
+   * Sends a message through a messenger instance (telegram.0 by default). Only text, no images (audit B.10.22).
+   *
+   * @param text - Message
+   * @param instanceValue - Instance from the config
+   * @param usersValue - Receivers from the config, empty for all
+   */
+  async notify(text, instanceValue, usersValue) {
+    var _a;
+    const instance = (0, import_config.notifyInstance)(instanceValue);
+    if (!instance) {
+      throw new Error("the instance for messages is not valid (example: telegram.0)");
+    }
+    if (!((_a = await this.getForeignStateAsync(`system.adapter.${instance}.alive`)) == null ? void 0 : _a.val)) {
+      throw new Error(`${instance} is not running`);
+    }
+    const users = (0, import_config.notifyUsers)(usersValue);
+    for (const user of users.length > 0 ? users : [void 0]) {
+      const answer = await this.sendToAsync(instance, "send", user ? { text, user } : { text }, {
+        timeout: NOTIFY_TIMEOUT_MS
+      });
+      if (answer && typeof answer === "object" && "error" in answer && answer.error) {
+        throw new Error(`${instance}: ${typeof answer.error === "string" ? answer.error : "error"}`);
+      }
+    }
+  }
   async updateImages(homescreen) {
     try {
       await this.images.sync(homescreen.devices);
@@ -886,6 +966,15 @@ class Blink extends utils.Adapter {
     if ((obj == null ? void 0 : obj.command) === "liveStart" || (obj == null ? void 0 : obj.command) === "liveStop") {
       await this.onLiveMessage(obj, reply);
       return;
+    }
+    if ((obj == null ? void 0 : obj.command) === "batteryTest") {
+      const message2 = obj.message;
+      try {
+        await this.notify((0, import_battery_warner.batteryTestText)(await this.german()), message2 == null ? void 0 : message2.instance, message2 == null ? void 0 : message2.users);
+        return reply({ result: "OK" });
+      } catch (err) {
+        return reply({ error: (0, import_errors.describeError)(err) });
+      }
     }
     if ((obj == null ? void 0 : obj.command) !== "verifyPin") {
       return;

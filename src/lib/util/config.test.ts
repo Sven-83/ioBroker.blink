@@ -17,6 +17,8 @@ import {
     livePort,
     normalizeEmail,
     normalizePin,
+    notifyInstance,
+    notifyUsers,
     pollDelayMs,
     pollIntervalSeconds,
 } from './config';
@@ -101,5 +103,22 @@ describe('util/config', () => {
         expect(normalizePin('12ab56')).to.equal(undefined);
         expect(normalizePin('123')).to.equal(undefined);
         expect(normalizePin(undefined)).to.equal(undefined);
+    });
+});
+
+describe('util/config messages', () => {
+    it('accepts instance names only, empty means telegram.0', () => {
+        expect(notifyInstance('')).to.equal('telegram.0');
+        expect(notifyInstance(undefined)).to.equal('telegram.0');
+        expect(notifyInstance(' telegram.1 ')).to.equal('telegram.1');
+        expect(notifyInstance('system.adapter.telegram.0')).to.equal(undefined);
+        expect(notifyInstance('telegram')).to.equal(undefined);
+        expect(notifyInstance('../x.0')).to.equal(undefined);
+    });
+
+    it('splits the receivers, without blanks and doubles', () => {
+        expect(notifyUsers('')).to.deep.equal([]);
+        expect(notifyUsers(' Sven, ,Anna,Sven ')).to.deep.equal(['Sven', 'Anna']);
+        expect(notifyUsers(42)).to.deep.equal([]);
     });
 });
