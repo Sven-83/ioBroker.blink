@@ -19,7 +19,9 @@ ioBroker adapter for Blink cameras (Amazon). It uses the unofficial Blink cloud 
 - Arm/disarm per network with readback: the state is confirmed only after Blink reports it
 - "Arm selected networks" and "disarm all"
 - Motion detection on/off per camera with readback
-- Snapshots stored in the file storage of the instance, deleted after a retention period
+- Snapshots stored in the file storage of the instance; the last image of each camera is kept until a newer one
+  replaces it (or, if switched off, deleted after a retention period)
+- Optional automatic image of all cameras on a fixed day and time, e.g. every second Saturday at 12:00
 - Live image (ffmpeg, MJPEG) - off by default, local access only, random token per session
 - Time, source and detection of the last motion clip; the last clip of each camera is stored and can be played
 - Touch page for the web adapter with all cameras grouped by network
@@ -45,7 +47,10 @@ or in Admin: *Adapters* → *Install from custom URL* → `https://github.com/Sv
 | E-mail address / password | Blink account (both protected, the password is stored encrypted) |
 | 2FA code | Only when Blink sends a code; it is stored encrypted, used once and then deleted |
 | Polling interval | Seconds, 30 to 3600, default 60 |
-| Keep images for | Hours, 1 to 720, default 24. Images and clips are deleted after this time |
+| Keep images for | Hours, 1 to 720, default 24. Clips are deleted after this time, images only if the next option is off |
+| Keep the last image of each camera | Default on. The image stays until a newer one replaces it |
+| Automatic image every (weeks) | 0 = off, default 2. Wakes every camera once, which uses some battery |
+| Day / time of the automatic image | Default Saturday, 12:00 (local time). A missed run is made up as soon as the adapter is connected again |
 | Allow live image | Off by default. Needs ffmpeg; a live image keeps a battery camera awake |
 | Address / port of the live image | Default `127.0.0.1:8766` (this computer only). Enter the address of this computer for displays in your network |
 | Time limit of a live image | Seconds, 30 to 600, default 120 |
@@ -67,6 +72,7 @@ or in Admin: *Adapters* → *Install from custom URL* → `https://github.com/Sv
 | `info.loginState` | `ok`, `connecting`, `twoFactorRequired`, `twoFactorRejected`, `credentialsRejected` (no further attempts until the settings change), `rateLimited`, `error` (retry with backoff), `noConfig` |
 | `info.lastPoll` | Time of the last successful poll |
 | `info.batteryWarnings` | Battery warnings sent (internal, only with the battery warning on) |
+| `info.lastAutoSnapshot` | Time of the last automatic image of all cameras |
 | `auth.*` | Session, pending login and device ID - encrypted, do not edit |
 | `networks.<id>.armed` | Arm (`true`) or disarm (`false`); ack only after Blink reports the new state |
 | `networks.<id>.armPending` / `armResult` | Command running / result: `confirmed`, `rejected`, `unconfirmed` |
@@ -102,8 +108,8 @@ images with their age, arm/disarm, motion detection, new image, live image and t
 
 ### Security
 Cameras show private areas, and arming controls a security system. Only make ioBroker admin and web reachable with
-authentication and HTTPS. Images and clips are personal data: they stay in the file storage of the instance and are
-deleted after the retention period; only the optional battery warning sends text to Telegram.
+authentication and HTTPS. Images and clips are personal data: they stay in the file storage of the instance; clips
+are deleted after the retention period, the last image of each camera only if keeping it is switched off; only the optional battery warning sends text to Telegram.
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ### Known limitations

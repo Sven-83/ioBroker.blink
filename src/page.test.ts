@@ -108,6 +108,16 @@ describe('camera page core', () => {
         expect(core.formatAge('de', 'x', now)).to.equal('');
     });
 
+    it('tries a failed image again with a growing wait', () => {
+        expect(core.imageRetryMs(0)).to.equal(2000);
+        expect(core.imageRetryMs(1)).to.equal(5000);
+        expect(core.imageRetryMs(3)).to.equal(60000);
+        expect(core.imageRetryMs(4)).to.equal(300000);
+        expect(core.imageRetryMs(99), 'last wait repeats').to.equal(300000);
+        expect(core.imageRetryMs(-1)).to.equal(2000);
+        expect(core.imageRetryMs(Number.NaN)).to.equal(2000);
+    });
+
     it('accepts only image files of its own instance', () => {
         expect(core.imageSrc(NS, '/blink.0/cameras_300.jpg', 1234)).to.equal('../blink.0/cameras_300.jpg?t=1234');
         expect(core.imageSrc(NS, '/blink.0/cameras_300.jpg', 0)).to.equal('../blink.0/cameras_300.jpg?t=0');

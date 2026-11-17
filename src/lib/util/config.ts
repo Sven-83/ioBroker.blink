@@ -44,6 +44,60 @@ export function imageRetentionHours(value: unknown): number {
     return Math.min(Math.max(hours, IMAGE_RETENTION_MIN_H), IMAGE_RETENTION_MAX_H);
 }
 
+/** Automatic image of all cameras: every this many weeks (0 = off). It wakes the cameras, so it stays rare */
+export const AUTO_SNAPSHOT_WEEKS_DEFAULT = 2;
+export const AUTO_SNAPSHOT_WEEKS_MAX = 8;
+/** Day of the automatic image, 0 = Sunday ... 6 = Saturday */
+export const AUTO_SNAPSHOT_DAY_DEFAULT = 6;
+/** Time of the automatic image, local time */
+export const AUTO_SNAPSHOT_TIME_DEFAULT = '12:00';
+
+/**
+ * Weeks between two automatic images, 0 = off.
+ *
+ * @param value - Value from the instance config
+ */
+export function autoSnapshotWeeks(value: unknown): number {
+    if (value === undefined || value === null || value === '') {
+        return AUTO_SNAPSHOT_WEEKS_DEFAULT;
+    }
+    const weeks = Math.round(Number(value));
+    if (!Number.isFinite(weeks) || weeks < 0) {
+        return AUTO_SNAPSHOT_WEEKS_DEFAULT;
+    }
+    return Math.min(weeks, AUTO_SNAPSHOT_WEEKS_MAX);
+}
+
+/**
+ * Day of the week of the automatic image, 0 = Sunday ... 6 = Saturday.
+ *
+ * @param value - Value from the instance config
+ */
+export function autoSnapshotDay(value: unknown): number {
+    if (value === undefined || value === null || value === '') {
+        return AUTO_SNAPSHOT_DAY_DEFAULT;
+    }
+    const day = Number(value);
+    return Number.isInteger(day) && day >= 0 && day <= 6 ? day : AUTO_SNAPSHOT_DAY_DEFAULT;
+}
+
+/**
+ * Time of day of the automatic image as hours and minutes, from "HH:MM".
+ *
+ * @param value - Value from the instance config
+ */
+export function autoSnapshotTime(value: unknown): { hour: number; minute: number } {
+    const match = (typeof value === 'string' ? value.trim() : '').match(/^(\d{1,2}):(\d{2})$/);
+    if (match) {
+        const hour = Number(match[1]);
+        const minute = Number(match[2]);
+        if (hour <= 23 && minute <= 59) {
+            return { hour, minute };
+        }
+    }
+    return autoSnapshotTime(AUTO_SNAPSHOT_TIME_DEFAULT);
+}
+
 /** Limits of a live session in seconds: it keeps a battery camera awake */
 export const LIVE_MAX_DEFAULT_S = 120;
 export const LIVE_MAX_MIN_S = 30;

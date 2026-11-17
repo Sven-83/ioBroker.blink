@@ -220,6 +220,9 @@
         tabs.textContent = '';
         container.textContent = '';
         sections.clear();
+        for (const card of cards.values()) {
+            clearTimeout(card.retry);
+        }
         cards.clear();
         $('empty').textContent = C.t(lang, 'noCameras');
         $('empty').classList.toggle('show', groups.length === 0);
@@ -334,7 +337,46 @@
                 setState(`${namespace}.${base}.enabled`, val(`${base}.enabled`) === false);
             }
         });
-        return { camera, element, q, src: '' };
+        return { camera, element, q, src: '', tries: 0, failed: false, retry: 0 };
+    }
+
+    /**
+     * Loads the image of a card. A failed load (e.g. the tablet was offline for a moment) is tried again with a
+     * growing wait, and at once when the page becomes visible or the network comes back. Until then the
+     * placeholder shows instead of a black card.
+     *
+     * @param {object} card - Card context
+     */
+    function loadImage(card) {
+        const img = card.q('img');
+        clearTimeout(card.retry);
+        img.onload = () => {
+            card.failed = false;
+            card.tries = 0;
+            img.classList.add('loaded');
+        };
+        img.onerror = () => {
+            img.classList.remove('loaded');
+            card.failed = true;
+            const wait = C.imageRetryMs(card.tries);
+            card.tries += 1;
+            card.retry = setTimeout(() => {
+                if (card.src && cards.get(card.camera.id) === card) {
+                    loadImage(card);
+                }
+            }, wait);
+        };
+        // another address for each try, so the browser does not answer from a cached failure
+        img.src = card.tries > 0 ? `${card.src}${card.src.includes('?') ? '&' : '?'}r=${card.tries}` : card.src;
+    }
+
+    /** Tries failed images again at once: the page was hidden or the network was away. */
+    function retryFailedImages() {
+        for (const card of cards.values()) {
+            if (card.failed && card.src) {
+                loadImage(card);
+            }
+        }
     }
 
     // ------------------------------------------------------------ view
@@ -417,11 +459,14 @@
         const img = q('img');
         if (src !== card.src) {
             card.src = src;
+            card.tries = 0;
+            card.failed = false;
+            clearTimeout(card.retry);
             img.classList.remove('loaded');
             if (src) {
-                img.onload = () => img.classList.add('loaded');
-                img.src = src;
+                loadImage(card);
             } else {
+                img.onerror = null;
                 img.removeAttribute('src');
             }
         }
@@ -698,6 +743,12 @@
         layout();
         window.addEventListener('resize', () => {
             layout();
+        });
+        window.addEventListener('online', retryFailedImages);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                retryFailedImages();
+            }
         });
         window.addEventListener('pagehide', closeLive);
         window.addEventListener('pagehide', closeClip);

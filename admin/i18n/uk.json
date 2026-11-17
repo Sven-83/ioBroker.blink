@@ -30,5 +30,20 @@
     "Telegram instance": "Екземпляр Telegram",
     "Receivers": "Одержувачі",
     "Telegram user names, separated by commas. Empty: all users of the instance.": "Імена користувачів Telegram через кому. Порожньо: усі користувачі екземпляра.",
-    "Send a test message": "Надіслати тестове повідомлення"
+    "Send a test message": "Надіслати тестове повідомлення",
+    "Keep the last image of each camera": "Зберігати останнє зображення кожної камери",
+    "It stays until a newer image replaces it. Otherwise it is deleted after the time above. Clips are always deleted after that time.": "Воно залишається, доки його не замінить новіше зображення. Інакше воно видаляється після зазначеного вище часу. Кліпи завжди видаляються після цього часу.",
+    "Automatic image of all cameras every (weeks)": "Автоматичне зображення всіх камер кожні (тижнів)",
+    "0 = off. Wakes every camera once, which uses some battery.": "0 = вимк. Будить кожну камеру один раз, це витрачає трохи заряду.",
+    "Day of the automatic image": "День автоматичного зображення",
+    "Time of the automatic image": "Час автоматичного зображення",
+    "HH:MM, local time": "ГГ:ХХ, місцевий час",
+    "Please enter a time like 12:00": "Введіть час, наприклад 12:00",
+    "Sunday": "Неділя",
+    "Monday": "Понеділок",
+    "Tuesday": "Вівторок",
+    "Wednesday": "Середа",
+    "Thursday": "Четвер",
+    "Friday": "П'ятниця",
+    "Saturday": "Субота"
 }

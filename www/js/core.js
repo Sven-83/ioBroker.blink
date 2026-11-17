@@ -335,6 +335,20 @@
         return t(lang, 'daysAgo', Math.floor(hours / 24));
     }
 
+    /** Waits before loading a failed image again; the last one repeats */
+    const IMAGE_RETRY_MS = [2000, 5000, 15000, 60000, 300000];
+
+    /**
+     * Wait before the next try to load an image.
+     *
+     * @param {number} tries - Failed tries so far
+     * @returns {number} milliseconds
+     */
+    function imageRetryMs(tries) {
+        const index = Number.isInteger(tries) && tries > 0 ? tries : 0;
+        return IMAGE_RETRY_MS[Math.min(index, IMAGE_RETRY_MS.length - 1)];
+    }
+
     /**
      * Address of the stored image for an <img>. Only files of this instance are accepted, nothing else the
      * state might contain. The adapter writes /<namespace>/cameras/<id>.jpg?t=<saved at>; the time makes the
@@ -517,6 +531,7 @@
         groupCameras,
         formatAge,
         imageSrc,
+        imageRetryMs,
         liveUrl,
         viewFromSearch,
         fitColumns,

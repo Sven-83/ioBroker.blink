@@ -30,5 +30,20 @@
     "Telegram instance": "Telegram-instantie",
     "Receivers": "Ontvangers",
     "Telegram user names, separated by commas. Empty: all users of the instance.": "Telegram-gebruikersnamen, gescheiden door komma's. Leeg: alle gebruikers van de instantie.",
-    "Send a test message": "Testbericht verzenden"
+    "Send a test message": "Testbericht verzenden",
+    "Keep the last image of each camera": "Laatste beeld van elke camera bewaren",
+    "It stays until a newer image replaces it. Otherwise it is deleted after the time above. Clips are always deleted after that time.": "Het blijft tot een nieuwer beeld het vervangt. Anders wordt het na de tijd hierboven verwijderd. Clips worden altijd na die tijd verwijderd.",
+    "Automatic image of all cameras every (weeks)": "Automatisch beeld van alle camera's elke (weken)",
+    "0 = off. Wakes every camera once, which uses some battery.": "0 = uit. Wekt elke camera één keer, dat kost wat batterij.",
+    "Day of the automatic image": "Dag van het automatische beeld",
+    "Time of the automatic image": "Tijd van het automatische beeld",
+    "HH:MM, local time": "UU:MM, lokale tijd",
+    "Please enter a time like 12:00": "Voer een tijd in zoals 12:00",
+    "Sunday": "Zondag",
+    "Monday": "Maandag",
+    "Tuesday": "Dinsdag",
+    "Wednesday": "Woensdag",
+    "Thursday": "Donderdag",
+    "Friday": "Vrijdag",
+    "Saturday": "Zaterdag"
 }

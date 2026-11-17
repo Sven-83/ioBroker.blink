@@ -87,6 +87,84 @@
             "lg": 4,
             "xl": 4
         },
+        "keepImages": {
+            "type": "checkbox",
+            "label": "Keep the last image of each camera",
+            "help": "It stays until a newer image replaces it. Otherwise it is deleted after the time above. Clips are always deleted after that time.",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "autoSnapshotWeeks": {
+            "type": "number",
+            "label": "Automatic image of all cameras every (weeks)",
+            "help": "0 = off. Wakes every camera once, which uses some battery.",
+            "min": 0,
+            "max": 8,
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "autoSnapshotDay": {
+            "type": "select",
+            "label": "Day of the automatic image",
+            "options": [
+                {
+                    "label": "Sunday",
+                    "value": 0
+                },
+                {
+                    "label": "Monday",
+                    "value": 1
+                },
+                {
+                    "label": "Tuesday",
+                    "value": 2
+                },
+                {
+                    "label": "Wednesday",
+                    "value": 3
+                },
+                {
+                    "label": "Thursday",
+                    "value": 4
+                },
+                {
+                    "label": "Friday",
+                    "value": 5
+                },
+                {
+                    "label": "Saturday",
+                    "value": 6
+                }
+            ],
+            "hidden": "!data.autoSnapshotWeeks",
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "autoSnapshotTime": {
+            "type": "text",
+            "label": "Time of the automatic image",
+            "help": "HH:MM, local time",
+            "validator": "/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test((data.autoSnapshotTime || '').trim())",
+            "validatorErrorText": "Please enter a time like 12:00",
+            "validatorNoSaveOnError": true,
+            "hidden": "!data.autoSnapshotWeeks",
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
         "_headerLive": {
             "type": "header",
             "text": "Live image",

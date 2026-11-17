@@ -1,6 +1,7 @@
 /*
  * Last image of each camera in the file storage of the adapter (audit B.5.8, B.11.7): the state only holds
- * the address. Images are personal data, so they are deleted after the retention period (audit B.10.22).
+ * the address. Images are personal data, so they are deleted after the retention period (audit B.10.22),
+ * unless the user chose to keep the last image of each camera until a newer one replaces it (retention Infinity).
  *
  * Blink keeps the last image of a camera in the cloud. Fetching it does not wake the camera, so changed
  * images can be picked up while polling.
@@ -99,7 +100,7 @@ export class ImageStore {
     /**
      * @param host - Adapter functions
      * @param tree - Object tree
-     * @param retentionMs - Images are deleted this long after their download
+     * @param retentionMs - Images are deleted this long after their download; Infinity keeps the last image
      */
     public constructor(
         private readonly host: ImageHost,
@@ -164,11 +165,12 @@ export class ImageStore {
         }
         const ref = hashOf(device.thumbnail);
         const info = await this.info(device.id);
-        if (info?.ref === ref) {
+        // a deleted image only comes back with a new one, unless images are kept: then it is fetched again
+        if (info?.ref === ref && (info.stored || Number.isFinite(this.retentionMs))) {
             return;
         }
         const data = await this.host.download(device.thumbnail);
-        if (info?.hash === hashOf(data)) {
+        if (info?.stored && info.hash === hashOf(data)) {
             await this.remember(device.id, { ...info, ref });
             return;
         }

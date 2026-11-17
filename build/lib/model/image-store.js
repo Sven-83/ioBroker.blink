@@ -61,7 +61,7 @@ class ImageStore {
   /**
    * @param host - Adapter functions
    * @param tree - Object tree
-   * @param retentionMs - Images are deleted this long after their download
+   * @param retentionMs - Images are deleted this long after their download; Infinity keeps the last image
    */
   constructor(host, tree, retentionMs) {
     this.host = host;
@@ -128,11 +128,11 @@ class ImageStore {
     }
     const ref = hashOf(device.thumbnail);
     const info = await this.info(device.id);
-    if ((info == null ? void 0 : info.ref) === ref) {
+    if ((info == null ? void 0 : info.ref) === ref && (info.stored || Number.isFinite(this.retentionMs))) {
       return;
     }
     const data = await this.host.download(device.thumbnail);
-    if ((info == null ? void 0 : info.hash) === hashOf(data)) {
+    if ((info == null ? void 0 : info.stored) && info.hash === hashOf(data)) {
       await this.remember(device.id, { ...info, ref });
       return;
     }

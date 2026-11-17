@@ -30,5 +30,20 @@
     "Telegram instance": "Instancia de Telegram",
     "Receivers": "Destinatarios",
     "Telegram user names, separated by commas. Empty: all users of the instance.": "Nombres de usuario de Telegram, separados por comas. Vacío: todos los usuarios de la instancia.",
-    "Send a test message": "Enviar un mensaje de prueba"
+    "Send a test message": "Enviar un mensaje de prueba",
+    "Keep the last image of each camera": "Conservar la última imagen de cada cámara",
+    "It stays until a newer image replaces it. Otherwise it is deleted after the time above. Clips are always deleted after that time.": "Se conserva hasta que una imagen más reciente la sustituye. Si no, se borra tras el tiempo indicado arriba. Los clips siempre se borran tras ese tiempo.",
+    "Automatic image of all cameras every (weeks)": "Imagen automática de todas las cámaras cada (semanas)",
+    "0 = off. Wakes every camera once, which uses some battery.": "0 = desactivado. Despierta cada cámara una vez, lo que gasta algo de batería.",
+    "Day of the automatic image": "Día de la imagen automática",
+    "Time of the automatic image": "Hora de la imagen automática",
+    "HH:MM, local time": "HH:MM, hora local",
+    "Please enter a time like 12:00": "Introduzca una hora como 12:00",
+    "Sunday": "Domingo",
+    "Monday": "Lunes",
+    "Tuesday": "Martes",
+    "Wednesday": "Miércoles",
+    "Thursday": "Jueves",
+    "Friday": "Viernes",
+    "Saturday": "Sábado"
 }

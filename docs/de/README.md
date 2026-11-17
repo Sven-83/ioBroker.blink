@@ -14,7 +14,9 @@ ioBroker-Adapter für Blink-Kameras (Amazon). Er nutzt die inoffizielle Blink-Cl
 - Scharf/Unscharf je Netzwerk mit Rückmeldung: der Zustand wird erst bestätigt, wenn Blink ihn meldet
 - „Ausgewählte Netzwerke scharf“ und „alle unscharf“
 - Bewegungserkennung an/aus je Kamera mit Rückmeldung
-- Snapshots im Dateispeicher der Instanz, Löschen nach einer Aufbewahrungsfrist
+- Snapshots im Dateispeicher der Instanz; das letzte Bild jeder Kamera bleibt, bis ein neueres es ersetzt
+  (ausgeschaltet: Löschen nach einer Aufbewahrungsfrist)
+- Optional automatisches Bild aller Kameras an festem Tag und Uhrzeit, z. B. jeden zweiten Samstag um 12:00
 - Livebild (ffmpeg, MJPEG) – standardmäßig aus, nur lokal erreichbar, zufälliges Token je Sitzung
 - Zeit, Auslöser und Erkennung des letzten Bewegungs-Clips; der letzte Clip je Kamera wird gespeichert und ist abspielbar
 - Touch-Seite für den Web-Adapter mit allen Kameras nach Netzwerk
@@ -40,7 +42,10 @@ oder im Admin: *Adapter* → *Aus eigener URL installieren* → `https://github.
 | E-Mail-Adresse / Passwort | Blink-Konto (beide geschützt, das Passwort verschlüsselt gespeichert) |
 | 2FA-Code | Nur wenn Blink einen Code schickt; er wird verschlüsselt gespeichert, einmal verwendet und dann gelöscht |
 | Abfrageintervall | Sekunden, 30 bis 3600, Standard 60 |
-| Bilder aufbewahren | Stunden, 1 bis 720, Standard 24. Bilder und Clips werden danach gelöscht |
+| Bilder aufbewahren | Stunden, 1 bis 720, Standard 24. Clips werden danach gelöscht, Bilder nur, wenn die nächste Option aus ist |
+| Letztes Bild jeder Kamera behalten | Standard an. Das Bild bleibt, bis ein neueres es ersetzt |
+| Automatisches Bild alle (Wochen) | 0 = aus, Standard 2. Weckt jede Kamera einmal, das kostet etwas Akku |
+| Tag / Uhrzeit des automatischen Bildes | Standard Samstag, 12:00 (Ortszeit). Ein verpasster Termin wird nachgeholt, sobald der Adapter wieder verbunden ist |
 | Livebild erlauben | Standardmäßig aus. Braucht ffmpeg; ein Livebild hält eine Batteriekamera wach |
 | Adresse / Port des Livebilds | Standard `127.0.0.1:8766` (nur dieser Rechner). Für Anzeigen im Netzwerk die Adresse dieses Rechners eintragen |
 | Zeitlimit eines Livebilds | Sekunden, 30 bis 600, Standard 120 |
@@ -62,6 +67,7 @@ oder im Admin: *Adapter* → *Aus eigener URL installieren* → `https://github.
 | `info.loginState` | `ok`, `connecting`, `twoFactorRequired`, `twoFactorRejected`, `credentialsRejected` (keine weiteren Versuche, bis die Einstellungen geändert werden), `rateLimited`, `error` (neuer Versuch mit Backoff), `noConfig` |
 | `info.lastPoll` | Zeit der letzten erfolgreichen Abfrage |
 | `info.batteryWarnings` | Gesendete Batteriewarnungen (intern, nur mit eingeschalteter Batteriewarnung) |
+| `info.lastAutoSnapshot` | Zeitpunkt des letzten automatischen Bildes aller Kameras |
 | `auth.*` | Sitzung, wartender Login und Geräte-ID – verschlüsselt, nicht ändern |
 | `networks.<id>.armed` | Scharf (`true`) oder unscharf (`false`); ack erst, wenn Blink den neuen Zustand meldet |
 | `networks.<id>.armPending` / `armResult` | Befehl läuft / Ergebnis: `confirmed`, `rejected`, `unconfirmed` |
@@ -99,7 +105,7 @@ Bilder mit Alter, Scharf/Unscharf, Bewegungserkennung, neues Bild, Livebild und 
 ## Sicherheit
 Kameras zeigen private Bereiche, und Scharfschalten steuert eine Sicherheitsanlage. ioBroker-Admin und -Web nur mit
 Anmeldung und HTTPS erreichbar machen. Bilder und Clips sind personenbezogene Daten: Sie bleiben im Dateispeicher der
-Instanz und werden nach der Frist gelöscht; nur die optionale Batteriewarnung schickt Text an Telegram.
+Instanz; Clips werden nach der Frist gelöscht, das letzte Bild jeder Kamera nur, wenn Behalten ausgeschaltet ist; nur die optionale Batteriewarnung schickt Text an Telegram.
 Schwachstellen bitte wie in [SECURITY.md](../../SECURITY.md) beschrieben melden.
 
 ## Bekannte Grenzen

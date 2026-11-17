@@ -4,12 +4,18 @@ import {
     POLL_JITTER_MS,
     POLL_MAX_S,
     POLL_MIN_S,
+    AUTO_SNAPSHOT_DAY_DEFAULT,
+    AUTO_SNAPSHOT_WEEKS_DEFAULT,
+    AUTO_SNAPSHOT_WEEKS_MAX,
     IMAGE_RETENTION_DEFAULT_H,
     IMAGE_RETENTION_MAX_H,
     LIVE_MAX_DEFAULT_S,
     LIVE_MAX_MAX_S,
     LIVE_MAX_MIN_S,
     LIVE_PORT_DEFAULT,
+    autoSnapshotDay,
+    autoSnapshotTime,
+    autoSnapshotWeeks,
     ffmpegCommand,
     imageRetentionHours,
     liveBindAddress,
@@ -70,6 +76,26 @@ describe('util/config', () => {
         expect(imageRetentionHours(99_999)).to.equal(IMAGE_RETENTION_MAX_H);
         for (const value of [undefined, null, '', 'abc', 0, -1]) {
             expect(imageRetentionHours(value), String(value)).to.equal(IMAGE_RETENTION_DEFAULT_H);
+        }
+    });
+
+    it('reads the plan of the automatic image', () => {
+        expect(autoSnapshotWeeks(2)).to.equal(2);
+        expect(autoSnapshotWeeks(0), 'off').to.equal(0);
+        expect(autoSnapshotWeeks('3')).to.equal(3);
+        expect(autoSnapshotWeeks(99)).to.equal(AUTO_SNAPSHOT_WEEKS_MAX);
+        for (const value of [undefined, null, '', 'abc', -1]) {
+            expect(autoSnapshotWeeks(value), String(value)).to.equal(AUTO_SNAPSHOT_WEEKS_DEFAULT);
+        }
+        expect(autoSnapshotDay(0)).to.equal(0);
+        expect(autoSnapshotDay('3')).to.equal(3);
+        for (const value of [undefined, '', 7, -1, 2.5, 'x']) {
+            expect(autoSnapshotDay(value), String(value)).to.equal(AUTO_SNAPSHOT_DAY_DEFAULT);
+        }
+        expect(autoSnapshotTime('7:05')).to.deep.equal({ hour: 7, minute: 5 });
+        expect(autoSnapshotTime(' 23:59 ')).to.deep.equal({ hour: 23, minute: 59 });
+        for (const value of [undefined, '', '24:00', '12:60', '12', 'noon', 1200]) {
+            expect(autoSnapshotTime(value), String(value)).to.deep.equal({ hour: 12, minute: 0 });
         }
     });
 

@@ -18,6 +18,10 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var config_exports = {};
 __export(config_exports, {
+  AUTO_SNAPSHOT_DAY_DEFAULT: () => AUTO_SNAPSHOT_DAY_DEFAULT,
+  AUTO_SNAPSHOT_TIME_DEFAULT: () => AUTO_SNAPSHOT_TIME_DEFAULT,
+  AUTO_SNAPSHOT_WEEKS_DEFAULT: () => AUTO_SNAPSHOT_WEEKS_DEFAULT,
+  AUTO_SNAPSHOT_WEEKS_MAX: () => AUTO_SNAPSHOT_WEEKS_MAX,
   IMAGE_RETENTION_DEFAULT_H: () => IMAGE_RETENTION_DEFAULT_H,
   IMAGE_RETENTION_MAX_H: () => IMAGE_RETENTION_MAX_H,
   IMAGE_RETENTION_MIN_H: () => IMAGE_RETENTION_MIN_H,
@@ -31,6 +35,9 @@ __export(config_exports, {
   POLL_MAX_S: () => POLL_MAX_S,
   POLL_MIN_S: () => POLL_MIN_S,
   TEST_ORIGIN_ENV: () => TEST_ORIGIN_ENV,
+  autoSnapshotDay: () => autoSnapshotDay,
+  autoSnapshotTime: () => autoSnapshotTime,
+  autoSnapshotWeeks: () => autoSnapshotWeeks,
   ffmpegCommand: () => ffmpegCommand,
   imageRetentionHours: () => imageRetentionHours,
   liveBindAddress: () => liveBindAddress,
@@ -66,6 +73,38 @@ function imageRetentionHours(value) {
     return IMAGE_RETENTION_DEFAULT_H;
   }
   return Math.min(Math.max(hours, IMAGE_RETENTION_MIN_H), IMAGE_RETENTION_MAX_H);
+}
+const AUTO_SNAPSHOT_WEEKS_DEFAULT = 2;
+const AUTO_SNAPSHOT_WEEKS_MAX = 8;
+const AUTO_SNAPSHOT_DAY_DEFAULT = 6;
+const AUTO_SNAPSHOT_TIME_DEFAULT = "12:00";
+function autoSnapshotWeeks(value) {
+  if (value === void 0 || value === null || value === "") {
+    return AUTO_SNAPSHOT_WEEKS_DEFAULT;
+  }
+  const weeks = Math.round(Number(value));
+  if (!Number.isFinite(weeks) || weeks < 0) {
+    return AUTO_SNAPSHOT_WEEKS_DEFAULT;
+  }
+  return Math.min(weeks, AUTO_SNAPSHOT_WEEKS_MAX);
+}
+function autoSnapshotDay(value) {
+  if (value === void 0 || value === null || value === "") {
+    return AUTO_SNAPSHOT_DAY_DEFAULT;
+  }
+  const day = Number(value);
+  return Number.isInteger(day) && day >= 0 && day <= 6 ? day : AUTO_SNAPSHOT_DAY_DEFAULT;
+}
+function autoSnapshotTime(value) {
+  const match = (typeof value === "string" ? value.trim() : "").match(/^(\d{1,2}):(\d{2})$/);
+  if (match) {
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour <= 23 && minute <= 59) {
+      return { hour, minute };
+    }
+  }
+  return autoSnapshotTime(AUTO_SNAPSHOT_TIME_DEFAULT);
 }
 const LIVE_MAX_DEFAULT_S = 120;
 const LIVE_MAX_MIN_S = 30;
@@ -127,6 +166,10 @@ function testOrigin(value) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  AUTO_SNAPSHOT_DAY_DEFAULT,
+  AUTO_SNAPSHOT_TIME_DEFAULT,
+  AUTO_SNAPSHOT_WEEKS_DEFAULT,
+  AUTO_SNAPSHOT_WEEKS_MAX,
   IMAGE_RETENTION_DEFAULT_H,
   IMAGE_RETENTION_MAX_H,
   IMAGE_RETENTION_MIN_H,
@@ -140,6 +183,9 @@ function testOrigin(value) {
   POLL_MAX_S,
   POLL_MIN_S,
   TEST_ORIGIN_ENV,
+  autoSnapshotDay,
+  autoSnapshotTime,
+  autoSnapshotWeeks,
   ffmpegCommand,
   imageRetentionHours,
   liveBindAddress,

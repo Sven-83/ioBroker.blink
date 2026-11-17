@@ -30,5 +30,20 @@
     "Telegram instance": "Telegram-Instanz",
     "Receivers": "Empfänger",
     "Telegram user names, separated by commas. Empty: all users of the instance.": "Telegram-Benutzernamen, durch Komma getrennt. Leer: alle Benutzer der Instanz.",
-    "Send a test message": "Testnachricht senden"
+    "Send a test message": "Testnachricht senden",
+    "Keep the last image of each camera": "Letztes Bild jeder Kamera behalten",
+    "It stays until a newer image replaces it. Otherwise it is deleted after the time above. Clips are always deleted after that time.": "Es bleibt, bis ein neueres Bild es ersetzt. Sonst wird es nach der Zeit oben gelöscht. Clips werden immer nach dieser Zeit gelöscht.",
+    "Automatic image of all cameras every (weeks)": "Automatisches Bild aller Kameras alle (Wochen)",
+    "0 = off. Wakes every camera once, which uses some battery.": "0 = aus. Weckt jede Kamera einmal, das kostet etwas Akku.",
+    "Day of the automatic image": "Tag des automatischen Bildes",
+    "Time of the automatic image": "Uhrzeit des automatischen Bildes",
+    "HH:MM, local time": "HH:MM, Ortszeit",
+    "Please enter a time like 12:00": "Bitte eine Uhrzeit wie 12:00 eingeben",
+    "Sunday": "Sonntag",
+    "Monday": "Montag",
+    "Tuesday": "Dienstag",
+    "Wednesday": "Mittwoch",
+    "Thursday": "Donnerstag",
+    "Friday": "Freitag",
+    "Saturday": "Samstag"
 }

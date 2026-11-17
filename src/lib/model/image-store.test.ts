@@ -262,6 +262,30 @@ describe('model/image-store', () => {
         });
     });
 
+    describe('keeping the last image', () => {
+        it('never deletes it', async () => {
+            const { store, files, states } = setup({ retention: Number.POSITIVE_INFINITY });
+            await store.sync([device(5, '/a')]);
+            await store.expire(Date.now() + 365 * 24 * HOUR);
+            expect(files.has(fileName(5))).to.equal(true);
+            expect(states.get('cameras.5.image')).to.not.equal('');
+        });
+
+        it('fetches an image deleted under an earlier setting again, without waking the camera', async () => {
+            const first = setup();
+            await first.store.sync([device(5, '/a')]);
+            await first.store.expire(Date.now() + 25 * HOUR);
+            const stored = new Map<number, unknown>([[5, first.states.get('cameras.5.imageInfo')]]);
+
+            const second = setup({ stored, retention: Number.POSITIVE_INFINITY });
+            await second.store.sync([device(5, '/a')]);
+            expect(second.downloads).to.deep.equal(['/a']);
+            expect(second.files.has(fileName(5))).to.equal(true);
+            await second.store.sync([device(5, '/a')]);
+            expect(second.downloads, 'only once').to.deep.equal(['/a']);
+        });
+    });
+
     it('hashes text and files alike', () => {
         expect(hashOf('a')).to.equal(hashOf(Buffer.from('a')));
     });

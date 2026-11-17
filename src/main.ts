@@ -36,6 +36,12 @@ import {
     type SecretCodec,
 } from './lib/model/session-store';
 import { ArmQueue, MOTION_SWITCH } from './lib/model/arm-queue';
+import {
+    AUTO_SNAPSHOT_MAX_WAIT_MS,
+    AUTO_SNAPSHOT_RETRY_MS,
+    nextAutoSnapshot,
+    type AutoSnapshotPlan,
+} from './lib/model/auto-snapshot';
 import { ArmSelection, CONTROL_IDS, SELECTION_KEY } from './lib/model/arm-selection';
 import { BATTERY_STATE, BatteryWarner, batteryTestText } from './lib/model/battery-warner';
 import { ClipStore } from './lib/model/clip-store';
@@ -46,6 +52,9 @@ import { SnapshotQueue } from './lib/model/snapshot-queue';
 import { ObjectTree } from './lib/model/tree';
 import {
     TEST_ORIGIN_ENV,
+    autoSnapshotDay,
+    autoSnapshotTime,
+    autoSnapshotWeeks,
     ffmpegCommand,
     imageRetentionHours,
     liveBindAddress,
@@ -67,6 +76,8 @@ const RETRY_MAX_S = 1800;
 const NOTIFY_TIMEOUT_MS = 15_000;
 /** Random start delay, so many instances restarting together do not hit the cloud at once (audit B.11.1) */
 const START_JITTER_MS = 2_000;
+/** Time of the last automatic image of all cameras */
+const AUTO_SNAPSHOT_STATE = 'info.lastAutoSnapshot';
 /** The access token is renewed this long before it expires */
 const REFRESH_MARGIN_MS = 5 * 60_000;
 
@@ -101,6 +112,7 @@ class Blink extends utils.Adapter {
     private lane: Promise<unknown> = Promise.resolve();
     private session: Session | undefined;
     private timer: ioBroker.Timeout | undefined;
+    private autoTimer: ioBroker.Timeout | undefined;
     private retrySeconds = RETRY_START_S;
     private email = '';
     private pollSeconds = 0;
@@ -348,7 +360,10 @@ class Blink extends utils.Adapter {
                 warn: message => this.log.warn(message),
             },
             this.tree,
-            imageRetentionHours(this.config.imageRetentionHours) * 3_600_000,
+            // kept: the last image of a camera stays until a newer one replaces it
+            this.config.keepImages === false
+                ? imageRetentionHours(this.config.imageRetentionHours) * 3_600_000
+                : Number.POSITIVE_INFINITY,
         );
         this.snapshots = new SnapshotQueue(
             {
@@ -411,6 +426,108 @@ class Blink extends utils.Adapter {
         await this.subscribeStatesAsync('control.*');
         await this.setLoginState('connecting');
         this.schedule(Math.floor(Math.random() * START_JITTER_MS), () => this.connect());
+        await this.setObjectNotExistsAsync(AUTO_SNAPSHOT_STATE, {
+            type: 'state',
+            common: {
+                name: 'Planned time of the last automatic image of all cameras',
+                type: 'number',
+                role: 'date',
+                read: true,
+                write: false,
+            },
+            native: {},
+        });
+        await this.planAutoSnapshot();
+    }
+
+    /** Day, time and rhythm of the automatic image from the config */
+    private autoSnapshotPlan(): AutoSnapshotPlan {
+        return {
+            weeks: autoSnapshotWeeks(this.config.autoSnapshotWeeks),
+            day: autoSnapshotDay(this.config.autoSnapshotDay),
+            ...autoSnapshotTime(this.config.autoSnapshotTime),
+        };
+    }
+
+    /**
+     * Plans the next automatic image. Waits of more than a day are split, so the time is computed again
+     * (clock changes, timer limit). A missed run is due at once.
+     */
+    private async planAutoSnapshot(): Promise<void> {
+        this.clearTimeout(this.autoTimer);
+        this.autoTimer = undefined;
+        if (this.abort.signal.aborted) {
+            return;
+        }
+        const last = (await this.getStateAsync(AUTO_SNAPSHOT_STATE))?.val;
+        const now = Date.now();
+        const next = nextAutoSnapshot(now, typeof last === 'number' ? last : undefined, this.autoSnapshotPlan());
+        if (next === undefined) {
+            return;
+        }
+        const wait = Math.max(0, next.runAt - now);
+        if (next.slot < now) {
+            this.log.info(`Automatic image of ${new Date(next.slot).toLocaleString()} was missed, taken now`);
+        } else {
+            this.log.debug(`Next automatic image of all cameras: ${new Date(next.slot).toLocaleString()}`);
+        }
+        const due = wait <= AUTO_SNAPSHOT_MAX_WAIT_MS;
+        this.startAutoTimer(Math.min(wait, AUTO_SNAPSHOT_MAX_WAIT_MS), () =>
+            due ? this.runAutoSnapshot(next.slot, true) : this.planAutoSnapshot(),
+        );
+    }
+
+    /**
+     * Starts the timer of the automatic image.
+     *
+     * @param ms - Delay
+     * @param task - Task to run
+     */
+    private startAutoTimer(ms: number, task: () => Promise<void>): void {
+        this.clearTimeout(this.autoTimer);
+        this.autoTimer = this.setTimeout(() => {
+            this.autoTimer = undefined;
+            task().catch((err: unknown) => {
+                if (!this.abort.signal.aborted) {
+                    this.log.error(`Automatic image: ${describeError(err)}`);
+                }
+            });
+        }, ms);
+    }
+
+    /**
+     * Takes a new image of every camera. The snapshot queue runs them one after the other per network. Not
+     * connected yet (e.g. right after a start): waits for the connection. The planned time is stored first, so a
+     * restart in between does not repeat it and the rhythm stays on the planned day.
+     *
+     * @param slot - Planned time of this run
+     * @param first - First try of this run (logged once)
+     */
+    private async runAutoSnapshot(slot: number, first: boolean): Promise<void> {
+        const devices = this.homescreen?.devices ?? [];
+        const queue = this.snapshots;
+        if (!queue || !this.cloudConnected || devices.length === 0) {
+            const message = 'Automatic image of all cameras: waiting for the connection to Blink';
+            if (first) {
+                this.log.info(message);
+            } else {
+                this.log.debug(message);
+            }
+            this.startAutoTimer(AUTO_SNAPSHOT_RETRY_MS, () => this.runAutoSnapshot(slot, false));
+            return;
+        }
+        await this.setState(AUTO_SNAPSHOT_STATE, slot, true);
+        this.log.info(`Automatic image of all cameras (${devices.length})`);
+        await Promise.all(
+            devices.map(device =>
+                queue.request(device.id).catch((err: unknown) => {
+                    if (!this.abort.signal.aborted) {
+                        this.log.warn(`Camera ${device.id}: automatic image failed: ${describeError(err)}`);
+                    }
+                }),
+            ),
+        );
+        await this.planAutoSnapshot();
     }
 
     /**
@@ -1171,6 +1288,8 @@ class Blink extends utils.Adapter {
             this.live?.shutdown();
             this.clearTimeout(this.timer);
             this.timer = undefined;
+            this.clearTimeout(this.autoTimer);
+            this.autoTimer = undefined;
             // not awaited: the callback must come in any case; the database may already be closing
             this.setState('info.connection', false, true).catch((err: unknown) =>
                 this.log.debug(`info.connection not reset: ${describeError(err)}`),

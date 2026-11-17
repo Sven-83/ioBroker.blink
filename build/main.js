@@ -35,6 +35,7 @@ var import_oauth = require("./lib/api/oauth");
 var import_rest = require("./lib/api/rest");
 var import_session_store = require("./lib/model/session-store");
 var import_arm_queue = require("./lib/model/arm-queue");
+var import_auto_snapshot = require("./lib/model/auto-snapshot");
 var import_arm_selection = require("./lib/model/arm-selection");
 var import_battery_warner = require("./lib/model/battery-warner");
 var import_clip_store = require("./lib/model/clip-store");
@@ -48,6 +49,7 @@ const RETRY_START_S = 60;
 const RETRY_MAX_S = 1800;
 const NOTIFY_TIMEOUT_MS = 15e3;
 const START_JITTER_MS = 2e3;
+const AUTO_SNAPSHOT_STATE = "info.lastAutoSnapshot";
 const REFRESH_MARGIN_MS = 5 * 6e4;
 class Blink extends utils.Adapter {
   abort = new AbortController();
@@ -70,6 +72,7 @@ class Blink extends utils.Adapter {
   lane = Promise.resolve();
   session;
   timer;
+  autoTimer;
   retrySeconds = RETRY_START_S;
   email = "";
   pollSeconds = 0;
@@ -321,7 +324,8 @@ class Blink extends utils.Adapter {
         warn: (message) => this.log.warn(message)
       },
       this.tree,
-      (0, import_config.imageRetentionHours)(this.config.imageRetentionHours) * 36e5
+      // kept: the last image of a camera stays until a newer one replaces it
+      this.config.keepImages === false ? (0, import_config.imageRetentionHours)(this.config.imageRetentionHours) * 36e5 : Number.POSITIVE_INFINITY
     );
     this.snapshots = new import_snapshot_queue.SnapshotQueue(
       {
@@ -385,6 +389,107 @@ class Blink extends utils.Adapter {
     await this.subscribeStatesAsync("control.*");
     await this.setLoginState("connecting");
     this.schedule(Math.floor(Math.random() * START_JITTER_MS), () => this.connect());
+    await this.setObjectNotExistsAsync(AUTO_SNAPSHOT_STATE, {
+      type: "state",
+      common: {
+        name: "Planned time of the last automatic image of all cameras",
+        type: "number",
+        role: "date",
+        read: true,
+        write: false
+      },
+      native: {}
+    });
+    await this.planAutoSnapshot();
+  }
+  /** Day, time and rhythm of the automatic image from the config */
+  autoSnapshotPlan() {
+    return {
+      weeks: (0, import_config.autoSnapshotWeeks)(this.config.autoSnapshotWeeks),
+      day: (0, import_config.autoSnapshotDay)(this.config.autoSnapshotDay),
+      ...(0, import_config.autoSnapshotTime)(this.config.autoSnapshotTime)
+    };
+  }
+  /**
+   * Plans the next automatic image. Waits of more than a day are split, so the time is computed again
+   * (clock changes, timer limit). A missed run is due at once.
+   */
+  async planAutoSnapshot() {
+    var _a;
+    this.clearTimeout(this.autoTimer);
+    this.autoTimer = void 0;
+    if (this.abort.signal.aborted) {
+      return;
+    }
+    const last = (_a = await this.getStateAsync(AUTO_SNAPSHOT_STATE)) == null ? void 0 : _a.val;
+    const now = Date.now();
+    const next = (0, import_auto_snapshot.nextAutoSnapshot)(now, typeof last === "number" ? last : void 0, this.autoSnapshotPlan());
+    if (next === void 0) {
+      return;
+    }
+    const wait = Math.max(0, next.runAt - now);
+    if (next.slot < now) {
+      this.log.info(`Automatic image of ${new Date(next.slot).toLocaleString()} was missed, taken now`);
+    } else {
+      this.log.debug(`Next automatic image of all cameras: ${new Date(next.slot).toLocaleString()}`);
+    }
+    const due = wait <= import_auto_snapshot.AUTO_SNAPSHOT_MAX_WAIT_MS;
+    this.startAutoTimer(
+      Math.min(wait, import_auto_snapshot.AUTO_SNAPSHOT_MAX_WAIT_MS),
+      () => due ? this.runAutoSnapshot(next.slot, true) : this.planAutoSnapshot()
+    );
+  }
+  /**
+   * Starts the timer of the automatic image.
+   *
+   * @param ms - Delay
+   * @param task - Task to run
+   */
+  startAutoTimer(ms, task) {
+    this.clearTimeout(this.autoTimer);
+    this.autoTimer = this.setTimeout(() => {
+      this.autoTimer = void 0;
+      task().catch((err) => {
+        if (!this.abort.signal.aborted) {
+          this.log.error(`Automatic image: ${(0, import_errors.describeError)(err)}`);
+        }
+      });
+    }, ms);
+  }
+  /**
+   * Takes a new image of every camera. The snapshot queue runs them one after the other per network. Not
+   * connected yet (e.g. right after a start): waits for the connection. The planned time is stored first, so a
+   * restart in between does not repeat it and the rhythm stays on the planned day.
+   *
+   * @param slot - Planned time of this run
+   * @param first - First try of this run (logged once)
+   */
+  async runAutoSnapshot(slot, first) {
+    var _a, _b;
+    const devices = (_b = (_a = this.homescreen) == null ? void 0 : _a.devices) != null ? _b : [];
+    const queue = this.snapshots;
+    if (!queue || !this.cloudConnected || devices.length === 0) {
+      const message = "Automatic image of all cameras: waiting for the connection to Blink";
+      if (first) {
+        this.log.info(message);
+      } else {
+        this.log.debug(message);
+      }
+      this.startAutoTimer(import_auto_snapshot.AUTO_SNAPSHOT_RETRY_MS, () => this.runAutoSnapshot(slot, false));
+      return;
+    }
+    await this.setState(AUTO_SNAPSHOT_STATE, slot, true);
+    this.log.info(`Automatic image of all cameras (${devices.length})`);
+    await Promise.all(
+      devices.map(
+        (device) => queue.request(device.id).catch((err) => {
+          if (!this.abort.signal.aborted) {
+            this.log.warn(`Camera ${device.id}: automatic image failed: ${(0, import_errors.describeError)(err)}`);
+          }
+        })
+      )
+    );
+    await this.planAutoSnapshot();
   }
   /**
    * Runs a single chained timer - retry and polling (which includes the token refresh) never overlap
@@ -1104,6 +1209,8 @@ class Blink extends utils.Adapter {
       (_a = this.live) == null ? void 0 : _a.shutdown();
       this.clearTimeout(this.timer);
       this.timer = void 0;
+      this.clearTimeout(this.autoTimer);
+      this.autoTimer = void 0;
       this.setState("info.connection", false, true).catch(
         (err) => this.log.debug(`info.connection not reset: ${(0, import_errors.describeError)(err)}`)
       );
