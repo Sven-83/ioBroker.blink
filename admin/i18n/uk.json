@@ -11,7 +11,7 @@
     "Needs ffmpeg. A live image keeps a battery camera awake.": "Потрібен ffmpeg. Відео в реальному часі не дає заснути камері на батареї.",
     "Path of ffmpeg": "Шлях до ffmpeg",
     "Port of the live image": "Порт відео в реальному часі",
-    "Seconds, 30 to 600": "Секунди, від 30 до 600",
+    "Seconds, 30 to 600, 0 = no limit": "Секунди, від 30 до 600, 0 = без обмеження",
     "Time limit of a live image": "Обмеження часу відео в реальному часі",
     "Hours, 1 to 720. Images of the cameras are personal data and are deleted after this time.": "Години, від 1 до 720. Зображення з камер є персональними даними й видаляються після цього часу.",
     "Images": "Зображення",

@@ -93,7 +93,7 @@ export interface LiveHost {
     clearTimer(timer: unknown): void;
     /** Where the server of the live image listens */
     listen(): ListenOptions;
-    /** Time limit of a session */
+    /** Time limit of a session, 0 = no limit */
     maxMs(): number;
     /** Log message on level debug */
     debug(message: string): void;
@@ -111,7 +111,7 @@ export interface LiveAccess {
     port?: number;
     /** Path of the image with the token of this session. Does not belong into states or the log */
     path?: string;
-    /** End of the session at the latest */
+    /** End of the session at the latest, missing without a time limit */
     expiresAt?: number;
 }
 
@@ -123,7 +123,8 @@ interface Session {
     streamPort: number;
     port: number;
     token: string;
-    expiresAt: number;
+    /** undefined without a time limit */
+    expiresAt: number | undefined;
     started: number;
     firstFrame: boolean;
     process: LiveProcess | undefined;
@@ -136,7 +137,7 @@ interface Session {
 /**
  * Arguments of ffmpeg: MPEG-TS from the input, single JPEG files to the output. No audio.
  *
- * @param maxSeconds - Time limit, as a second safeguard next to the timer of the adapter
+ * @param maxSeconds - Time limit, as a second safeguard next to the timer of the adapter; 0 = no limit
  */
 export function ffmpegArgs(maxSeconds: number): string[] {
     return [
@@ -156,8 +157,7 @@ export function ffmpegArgs(maxSeconds: number): string[] {
         'mpegts',
         '-i',
         'pipe:0',
-        '-t',
-        String(maxSeconds),
+        ...(maxSeconds > 0 ? ['-t', String(maxSeconds)] : []),
         '-an',
         '-vf',
         `fps=${LIVE_FPS},scale=${LIVE_WIDTH}:-2`,
@@ -305,7 +305,7 @@ export class LiveManager {
             streamPort: immiServer.port,
             port,
             token,
-            expiresAt: now + maxMs,
+            expiresAt: maxMs > 0 ? now + maxMs : undefined,
             started: now,
             firstFrame: false,
             process: undefined,
@@ -347,7 +347,8 @@ export class LiveManager {
         });
         session.immi = immi;
 
-        session.limit = this.host.setTimer(() => this.endSession(session, 'ended'), maxMs);
+        // without a time limit the session still ends when nobody watches (idle) or Blink closes the stream
+        session.limit = maxMs > 0 ? this.host.setTimer(() => this.endSession(session, 'ended'), maxMs) : undefined;
         session.idle = this.host.setTimer(() => this.endSession(session, 'idle'), LIVE_IDLE_MS);
         session.noFrame = this.host.setTimer(() => {
             this.host.warn(`Camera ${device.id}: no live image from Blink`);

@@ -83,6 +83,7 @@ interface Script {
     device?: BlinkDevice | undefined;
     start?: LiveStart | Error;
     connectThrows?: Error;
+    maxMs?: number;
 }
 
 interface Timer {
@@ -162,7 +163,7 @@ function setup(script: Script = {}): {
             }
         },
         listen: () => ({ host: '127.0.0.1', port: 0 }),
-        maxMs: () => 120_000,
+        maxMs: () => script.maxMs ?? 120_000,
         debug: message => messages.push(message),
         info: message => messages.push(message),
         warn: message => messages.push(message),
@@ -215,6 +216,12 @@ describe('model/live-manager ffmpegArgs', () => {
         expect(args[args.indexOf('-t') + 1]).to.equal('120');
         expect(args[args.indexOf('-f', args.indexOf('-c:v')) + 1]).to.equal('image2pipe');
     });
+
+    it('has no -t without a time limit', () => {
+        const args = ffmpegArgs(0);
+        expect(args).to.not.include('-t');
+        expect(args).to.include.members(['pipe:0', 'pipe:1', '-an']);
+    });
 });
 
 describe('model/live-manager', () => {
@@ -243,6 +250,17 @@ describe('model/live-manager', () => {
         expect(spawned).to.have.lengthOf(1);
         expect(last(writes, ACTIVE)).to.equal(true);
         expect(last(writes, RESULT)).to.equal('running');
+    });
+
+    it('without a time limit: no limit timer, no end time, ffmpeg without -t', async () => {
+        const { manager, timers, spawned } = use({ maxMs: 0 });
+        const access = await manager.start(CAM);
+
+        expect(access.result).to.equal('running');
+        expect(access.expiresAt).to.equal(undefined);
+        expect(spawned[0]).to.not.include('-t');
+        expect(timers.filter(timer => timer.active && timer.ms === 0)).to.deep.equal([]);
+        expect(timers.filter(timer => timer.active && timer.ms === LIVE_IDLE_MS)).to.have.lengthOf(1);
     });
 
     it('keeps the token out of states and log', async () => {

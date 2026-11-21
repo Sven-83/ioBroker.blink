@@ -53,8 +53,7 @@ function ffmpegArgs(maxSeconds) {
     "mpegts",
     "-i",
     "pipe:0",
-    "-t",
-    String(maxSeconds),
+    ...maxSeconds > 0 ? ["-t", String(maxSeconds)] : [],
     "-an",
     "-vf",
     `fps=${LIVE_FPS},scale=${LIVE_WIDTH}:-2`,
@@ -186,7 +185,7 @@ class LiveManager {
       streamPort: immiServer.port,
       port,
       token,
-      expiresAt: now + maxMs,
+      expiresAt: maxMs > 0 ? now + maxMs : void 0,
       started: now,
       firstFrame: false,
       process: void 0,
@@ -225,7 +224,7 @@ class LiveManager {
       clearTimer: (timer) => this.host.clearTimer(timer)
     });
     session.immi = immi;
-    session.limit = this.host.setTimer(() => this.endSession(session, "ended"), maxMs);
+    session.limit = maxMs > 0 ? this.host.setTimer(() => this.endSession(session, "ended"), maxMs) : void 0;
     session.idle = this.host.setTimer(() => this.endSession(session, "idle"), LIVE_IDLE_MS);
     session.noFrame = this.host.setTimer(() => {
       this.host.warn(`Camera ${device.id}: no live image from Blink`);

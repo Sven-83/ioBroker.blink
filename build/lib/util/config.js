@@ -111,8 +111,11 @@ const LIVE_MAX_MIN_S = 30;
 const LIVE_MAX_MAX_S = 600;
 const LIVE_PORT_DEFAULT = 8766;
 function liveMaxSeconds(value) {
+  if (value === 0 || value === "0") {
+    return 0;
+  }
   const seconds = Math.round(Number(value));
-  if (!Number.isFinite(seconds) || seconds <= 0) {
+  if (value === "" || value === null || !Number.isFinite(seconds) || seconds <= 0) {
     return LIVE_MAX_DEFAULT_S;
   }
   return Math.min(Math.max(seconds, LIVE_MAX_MIN_S), LIVE_MAX_MAX_S);

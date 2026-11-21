@@ -11,7 +11,7 @@
     "Needs ffmpeg. A live image keeps a battery camera awake.": "需要 ffmpeg。实时画面会使电池供电的摄像头保持唤醒。",
     "Path of ffmpeg": "ffmpeg 路径",
     "Port of the live image": "实时画面端口",
-    "Seconds, 30 to 600": "秒，30 到 600",
+    "Seconds, 30 to 600, 0 = no limit": "秒，30 到 600，0 = 不限制",
     "Time limit of a live image": "实时画面时间限制",
     "Hours, 1 to 720. Images of the cameras are personal data and are deleted after this time.": "小时，1 到 720。摄像头图像属于个人数据，超过此时间后将被删除。",
     "Images": "图像",

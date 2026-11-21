@@ -37,6 +37,14 @@ describe('util/config live image', () => {
         expect(liveMaxSeconds('abc')).to.equal(LIVE_MAX_DEFAULT_S);
     });
 
+    it('0 means no time limit, empty or negative values get the default', () => {
+        expect(liveMaxSeconds(0)).to.equal(0);
+        expect(liveMaxSeconds('0')).to.equal(0);
+        for (const value of [undefined, null, '', -5]) {
+            expect(liveMaxSeconds(value), String(value)).to.equal(LIVE_MAX_DEFAULT_S);
+        }
+    });
+
     it('stays on this computer unless a valid address is set', () => {
         expect(liveBindAddress('203.0.113.5')).to.equal('203.0.113.5');
         expect(liveBindAddress('::1')).to.equal('::1');

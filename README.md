@@ -95,7 +95,8 @@ or in Admin: *Adapters* → *Install from custom URL* → `https://github.com/Sv
 ### Live image
 The live image is started with `sendTo('blink.0', 'liveStart', { cameraId })`. The answer contains the port and the
 path with a random token for this session (never in a state or the log); `liveStop` ends it. One session at a time;
-it ends after the time limit, 20 s without a viewer or 30 s without a first image. The camera page uses this.
+it ends after the time limit (instance setting, 0 = no limit), 20 s without a viewer or 30 s without a first image.
+The camera page uses this.
 
 ### Camera page
 The web adapter serves a touch page at `http://<host>:<web port>/blink/index.html`: all cameras grouped by network,
@@ -143,6 +144,7 @@ Use at your own risk.
 - Motion time, detection and the last clip per camera, playable on the camera page
 - Optional battery warning through Telegram (text only)
 - Serial numbers are no longer stored as states; the 2FA code is stored encrypted
+- Live image without a time limit possible (time limit 0); it still ends without a viewer
 
 ## License
 MIT License

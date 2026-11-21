@@ -107,12 +107,16 @@ export const LIVE_PORT_DEFAULT = 8766;
 
 /**
  * Time limit of a live session from the config, clamped to the allowed range.
+ * 0 means no limit: the session then ends by stop, when nobody watches any more, or when Blink ends it.
  *
  * @param value - Value from the instance config
  */
 export function liveMaxSeconds(value: unknown): number {
+    if (value === 0 || value === '0') {
+        return 0;
+    }
     const seconds = Math.round(Number(value));
-    if (!Number.isFinite(seconds) || seconds <= 0) {
+    if (value === '' || value === null || !Number.isFinite(seconds) || seconds <= 0) {
         return LIVE_MAX_DEFAULT_S;
     }
     return Math.min(Math.max(seconds, LIVE_MAX_MIN_S), LIVE_MAX_MAX_S);

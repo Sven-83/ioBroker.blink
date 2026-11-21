@@ -209,8 +209,8 @@
         "liveMaxSeconds": {
             "type": "number",
             "label": "Time limit of a live image",
-            "help": "Seconds, 30 to 600",
-            "min": 30,
+            "help": "Seconds, 30 to 600, 0 = no limit",
+            "min": 0,
             "max": 600,
             "hidden": "!data.liveEnabled",
             "newLine": true,

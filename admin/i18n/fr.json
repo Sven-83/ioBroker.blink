@@ -11,7 +11,7 @@
     "Needs ffmpeg. A live image keeps a battery camera awake.": "Nécessite ffmpeg. Une image en direct maintient éveillée une caméra sur batterie.",
     "Path of ffmpeg": "Chemin de ffmpeg",
     "Port of the live image": "Port de l'image en direct",
-    "Seconds, 30 to 600": "Secondes, de 30 à 600",
+    "Seconds, 30 to 600, 0 = no limit": "Secondes, de 30 à 600, 0 = sans limite",
     "Time limit of a live image": "Durée maximale d'une image en direct",
     "Hours, 1 to 720. Images of the cameras are personal data and are deleted after this time.": "Heures, de 1 à 720. Les images des caméras sont des données personnelles et sont supprimées après ce délai.",
     "Images": "Images",
